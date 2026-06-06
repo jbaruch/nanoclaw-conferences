@@ -53,7 +53,7 @@ Reads of admin-owned files resolve because admin co-loads with this overlay in t
 | Skill | Description |
 |-------|-------------|
 | [check-cfps](skills/check-cfps/SKILL.md) | Finds open CFPs relevant to the user across Java/AI/developer conferences and maintains persistent CFP state (sent/dismissed/remind) in `cfp-state.json`. Use when the user asks about upcoming conferences, call for papers, speaking opportunities, CFP deadlines, or where to submit a talk proposal. |
-| [nightly-cfp-sync](skills/nightly-cfp-sync/SKILL.md) | Cadence wrapper (cron `30 6`, precheck-gated to a 3-day cap) that runs `check-cfps` on a schedule, consumes the CFP list internally, and surfaces only a stale-verification notice. Emits the observable-silence cursor marker the silent-success watchdog reads. |
+| [nightly-cfp-sync](skills/nightly-cfp-sync/SKILL.md) | Cadence wrapper (cron `30 6`, precheck-gated by a filesystem cadence cursor) that runs `check-cfps` on a schedule, consumes the CFP list internally, and surfaces only a stale-verification notice. Emits the observable-silence cursor marker the silent-success watchdog reads. |
 
 ## Skill scripts
 
@@ -70,7 +70,7 @@ The skill bundle includes deterministic scripts the agent invokes from the SKILL
 
 The `nightly-cfp-sync` cadence wrapper carries its own scripts:
 
-- `scripts/precheck-nightly-cfp-sync.py` — fire-time precheck that gates wake-ups by a 3-day cadence cap
+- `scripts/precheck-nightly-cfp-sync.py` — fire-time precheck that gates wake-ups by the cadence cursor
 - `scripts/stamp-cursor.py` — advances the `nightly-cfp-sync-cursor.json` success cursor after a clean run
 
 ## Status
