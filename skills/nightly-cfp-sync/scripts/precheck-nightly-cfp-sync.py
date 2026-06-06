@@ -126,9 +126,27 @@ def decide(now_utc: datetime, cursor_path: Path) -> dict:
 
 
 def main() -> int:
+    # outer-boundary-process-contract: the scheduler reads this script's
+    # stdout JSON to decide whether to wake the agent and treats a non-zero
+    # exit or absent/invalid stdout as "do not wake". An unhandled exception
+    # here would therefore SILENTLY suppress the cadence wake-up forever, so
+    # the catch-all below emits a fail-open wake payload (wake_agent: True)
+    # instead — a bug surfaces as a run, never as silent gating. Only
+    # `Exception` is caught; KeyboardInterrupt / SystemExit propagate so the
+    # process stays killable.
     cursor_path = Path(os.environ.get("NIGHTLY_CFP_SYNC_CURSOR", DEFAULT_CURSOR_PATH))
-    now_utc = datetime.now(timezone.utc)
-    payload = decide(now_utc, cursor_path)
+    try:
+        now_utc = datetime.now(timezone.utc)
+        payload = decide(now_utc, cursor_path)
+    except Exception as exc:
+        payload = {
+            "wake_agent": True,
+            "data": {
+                "reason": "precheck_error",
+                "error": f"{type(exc).__name__}: {exc}",
+                "cursor_path": str(cursor_path),
+            },
+        }
     sys.stdout.write(json.dumps(payload) + "\n")
     return 0
 

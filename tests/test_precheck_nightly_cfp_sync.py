@@ -125,3 +125,22 @@ def test_main_emits_json_and_exits_zero_on_no_cursor(tmp_path):
     payload = json.loads(proc.stdout)
     assert payload["wake_agent"] is True
     assert payload["data"]["reason"] == "no_cursor"
+
+
+def test_main_fails_open_on_unexpected_error(precheck, monkeypatch, capsys):
+    """outer-boundary-process-contract: an unexpected exception inside the
+    decision path must not crash the precheck (which the scheduler reads as
+    'do not wake'). main() catches it at the boundary, emits a fail-open
+    wake payload, and still exits 0."""
+
+    def _boom(*_a, **_k):
+        raise RuntimeError("unexpected")
+
+    monkeypatch.setattr(precheck, "decide", _boom)
+    code = precheck.main()
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert code == 0
+    assert payload["wake_agent"] is True
+    assert payload["data"]["reason"] == "precheck_error"
+    assert "RuntimeError: unexpected" in payload["data"]["error"]

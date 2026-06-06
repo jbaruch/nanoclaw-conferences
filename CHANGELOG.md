@@ -7,6 +7,7 @@ All notable changes to this tile are documented here.
 ### Added
 
 - `nightly-cfp-sync` cadence wrapper migrated from `nanoclaw-admin` (`jbaruch/nanoclaw-admin#298`). It runs `check-cfps` on a 3-day-capped `30 6` cadence, consumes the CFP list internally, surfaces only a stale-verification notice, and emits the observable-silence cursor marker. Co-locating the cadence driver with the skill it drives keeps the CFP domain self-contained in one tile (same pattern as `nanoclaw-flight-assist`'s `sync-tripit` + `check-travel-bookings`) and removes the cross-tile `Skill()` call that would otherwise span admin → conferences. Carries its precheck + stamp-cursor scripts, `cadence-rationale.md` / `state-schema.md` references, and both unit tests unchanged from the admin original.
+  - Origin: `nightly-cfp-sync` was peeled off the `nightly-external-sync` bundle in `jbaruch/nanoclaw#581` so the heavy full-cohort CFP verification gets its own bounded container instead of being cut off in the bundle's long tail — which had left `task_run_logs.result` empty. (Moved here from the reference doc per `coding-policy: context-writing-style` — incidents live in the CHANGELOG, not auto-loaded context.)
 
 ### Rules
 

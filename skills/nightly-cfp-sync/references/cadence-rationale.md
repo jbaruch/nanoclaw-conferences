@@ -1,6 +1,6 @@
 # Cadence rationale
 
-`nightly-cfp-sync` exists because the check-cfps run is heavy — full-cohort Sessionize verification across every stored `open`/`approved` entry, plus web-search gap discovery. It was peeled off the `nightly-external-sync` bundle (`jbaruch/nanoclaw#581`) so that long tail gets its own bounded container instead of exhausting the bundle before its final summary and leaving `task_run_logs.result` empty.
+The check-cfps run is heavy — full-cohort Sessionize verification across every stored `open`/`approved` entry, plus web-search gap discovery — so this wrapper runs it in its own bounded container on a capped cadence rather than inline with other maintenance.
 
 ## Why a cadence cap
 
