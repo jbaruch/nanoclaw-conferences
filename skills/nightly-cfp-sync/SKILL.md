@@ -19,7 +19,7 @@ The fire-time precheck (`scripts/precheck-nightly-cfp-sync.py`) gates wake-ups b
 
 Consume the formatted CFP list internally — do not forward it to Baruch. The skill emits a machine-readable `<internal>` block at the end with `{checked_at, new_candidates_added, existing_verified, existing_verify_failed}`. Parse that JSON. If `existing_verify_failed > 0`, forward a short notice via `mcp__nanoclaw__send_message` (e.g. `"check-cfps: <N> stored CFPs failed Sessionize verification this run; bot_notes prefixed with ⚠️ STALE DATA. Will retry next cycle."`). That notice is the only user-facing output; it drives the `surfaced` word in Step 3.
 
-On complete *technical* failure (both primary sources unreachable), notify Baruch via `mcp__nanoclaw__send_message`, do NOT stamp the cursor — emit `<internal>nightly-cfp-sync exited: inner-skill-fail</internal>` as your final turn text and finish here. The next cadence fire retries because the cursor stayed unadvanced.
+On complete *technical* failure (both primary sources unreachable), notify Baruch via `mcp__nanoclaw__send_message`, do NOT stamp the cursor — emit `<internal>nightly-cfp-sync exited: inner-skill-fail</internal>` as your final turn text and finish here. The next cadence fire retries.
 
 ## Step 2 — Advance the success cursor
 
@@ -31,7 +31,7 @@ python3 /home/node/.claude/skills/tessl__nightly-cfp-sync/scripts/stamp-cursor.p
 
 Atomic-writes `/workspace/group/state/nightly-cfp-sync-cursor.json` with `{"schema_version": 1, "last_run": "<now UTC ISO Z>"}`. The precheck reads `last_run` to gate the cadence (cap value in the script). Stdout on success: `{"status": "stamped", "last_run": "<iso>", "cursor_path": "<path>"}`, exit 0.
 
-If the stamp script exits non-zero (write failure — it writes a diagnostic to stderr), the cursor did NOT advance. Do NOT emit the healthy Step 3 marker, which would falsely tell the silent-success watchdog the run completed. Instead emit `<internal>nightly-cfp-sync exited: cursor-stamp-fail</internal>` as your final turn text and finish here. The next cadence fire retries because the cursor stayed unadvanced. Only on exit 0, proceed to Step 3.
+If the stamp script exits non-zero (write failure — it writes a diagnostic to stderr), the cursor did NOT advance. Do NOT emit the healthy Step 3 marker, which would falsely tell the silent-success watchdog the run completed. Instead emit `<internal>nightly-cfp-sync exited: cursor-stamp-fail</internal>` as your final turn text and finish here. The next cadence fire retries. Only on exit 0, proceed to Step 3.
 
 ## Step 3 — Observable-silence marker
 
