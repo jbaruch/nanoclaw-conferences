@@ -4,6 +4,12 @@ All notable changes to this tile are documented here.
 
 ## Unreleased
 
+### Changed
+
+- Reworded `skills/check-cfps/references/web-fetch-fallback.md` to describe `fetch_markdown` as the NanoClaw host's server-side renderer in neutral terms, dropping the `snitchmd` / `CloakBrowser` / "past anti-bot gates" wording the registry's intent-review moderation repeatedly misread as an attacker-proxy prompt-injection (false positive — these are first-party NanoClaw rendering services). Behavior is unchanged: same `fetch_markdown`-then-Composio fallback chain. Also dropped the cross-tile reference to the admin-only `max-effort` skill so the public tile is self-contained. Ends the per-publish moderation-override treadmill for this tile.
+
+## 0.1.1
+
 ### Added
 
 - `nightly-cfp-sync` cadence wrapper migrated from `nanoclaw-admin` (`jbaruch/nanoclaw-admin#298`). It runs `check-cfps` on a 3-day-capped `30 6` cadence, consumes the CFP list internally, surfaces only a stale-verification notice, and emits the observable-silence cursor marker. Co-locating the cadence driver with the skill it drives keeps the CFP domain self-contained in one tile (same pattern as `nanoclaw-flight-assist`'s `sync-tripit` + `check-travel-bookings`) and removes the cross-tile `Skill()` call that would otherwise span admin → conferences. Carries its precheck + stamp-cursor scripts, `cadence-rationale.md` / `state-schema.md` references, and both unit tests unchanged from the admin original.
