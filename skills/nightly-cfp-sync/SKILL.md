@@ -1,6 +1,6 @@
 ---
 name: nightly-cfp-sync
-description: "Cadence wrapper that runs check-cfps on its own schedule: refresh open CFP data, apply Sessionize verification, update cfp-state.json, emit an observable-silence cursor marker. Peeled off the nightly-external-sync bundle (jbaruch/nanoclaw#581) so the heavy full-cohort CFP verification gets its own bounded container. Triggers: 'cfp sync', 'sync cfps', 'nightly cfp sync', 'refresh cfps nightly'."
+description: "Cadence wrapper that runs check-cfps on its own schedule: refresh open CFP data, apply Sessionize verification, update cfp-state.json, emit an observable-silence cursor marker. Triggers: 'cfp sync', 'sync cfps', 'nightly cfp sync', 'refresh cfps nightly'."
 cadence: "30 6 * * * (TZ=local)"
 script: "scripts/precheck-nightly-cfp-sync.py"
 ---
@@ -29,7 +29,9 @@ Reachable only if Step 1 completed without a technical failure. Run the stamp sc
 python3 /home/node/.claude/skills/tessl__nightly-cfp-sync/scripts/stamp-cursor.py
 ```
 
-Atomic-writes `/workspace/group/state/nightly-cfp-sync-cursor.json` with `{"schema_version": 1, "last_run": "<now UTC ISO Z>"}`. The precheck reads `last_run` to gate the cadence (cap value in the script). Stdout: `{"status": "stamped", "last_run": "<iso>", "cursor_path": "<path>"}`. Proceed to Step 3.
+Atomic-writes `/workspace/group/state/nightly-cfp-sync-cursor.json` with `{"schema_version": 1, "last_run": "<now UTC ISO Z>"}`. The precheck reads `last_run` to gate the cadence (cap value in the script). Stdout on success: `{"status": "stamped", "last_run": "<iso>", "cursor_path": "<path>"}`, exit 0.
+
+If the stamp script exits non-zero (write failure — it writes a diagnostic to stderr), the cursor did NOT advance. Do NOT emit the healthy Step 3 marker, which would falsely tell the silent-success watchdog the run completed. Instead emit `<internal>nightly-cfp-sync exited: cursor-stamp-fail</internal>` as your final turn text and finish here. The next cadence fire retries because the cursor stayed unadvanced. Only on exit 0, proceed to Step 3.
 
 ## Step 3 — Observable-silence marker
 
