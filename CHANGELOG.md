@@ -7,6 +7,7 @@ All notable changes to this tile are documented here.
 ### Changed
 
 - Reworded `skills/check-cfps/references/web-fetch-fallback.md` to describe `fetch_markdown` as the NanoClaw host's server-side renderer in neutral terms, dropping the `snitchmd` / `CloakBrowser` / "past anti-bot gates" wording the registry's intent-review moderation repeatedly misread as an attacker-proxy prompt-injection (false positive — these are first-party NanoClaw rendering services). Behavior is unchanged: same `fetch_markdown`-then-Composio fallback chain. Also dropped the cross-tile reference to the admin-only `max-effort` skill so the public tile is self-contained. Ends the per-publish moderation-override treadmill for this tile.
+- Pinned `nightly-cfp-sync` to Haiku (`claude-haiku-4-5-20251001`) via `agentModel:` frontmatter — CFP data re-verify/sync is triage, not synthesis, so it no longer defaults to Opus. Part of the #613 Claude tier-down (`jbaruch/nanoclaw#613`).
 
 ## 0.1.1
 
