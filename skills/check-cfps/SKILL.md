@@ -13,6 +13,25 @@ Fetches open CFPs from multiple sources via `scripts/check-cfps-fetch.py`, appli
 
 The skill's write invariants (dedup-artifact ban, immutable `user_actioned`, dismissal-reason discipline, `last_verified` surfacing gate, no-silent-defer, budget-low-is-not-a-defer-reason) and the Step 4 verification-failure protocol (`_verify_failed`, `⚠️ STALE DATA` prefix, caller-visible counts) live in `references/contracts.md`. Read once, apply throughout.
 
+## Step 0 — Resume guard
+
+This pipeline can be interrupted mid-run by a token-limit continuation. To resume from disk instead of reconstructing the working set from chat history, open (or start) the run's checkpoint store first:
+
+```bash
+python3 /home/node/.claude/skills/tessl__check-cfps/scripts/run-state.py begin
+```
+
+- `{"resume": false}` — fresh run. Proceed from Step 1.
+- `{"resume": true, "completed": [...]}` — a run begun earlier today was interrupted. For each stage already in `completed`, reload its artifact with `run-state.py load <stage>` instead of recomputing it, and resume at the first step whose stage is absent.
+
+Stages, in pipeline order: `fetch` (Step 2), `candidates` (Steps 1–3 merge), `prep` / `sessionize_results` / `decisions` (Step 4), `working_set` (Steps 4–6, ready for Step 7). After producing each stage's artifact, persist it:
+
+```bash
+echo '<artifact json>' | python3 /home/node/.claude/skills/tessl__check-cfps/scripts/run-state.py save <stage>
+```
+
+Resume is best-effort — stages are idempotent and Step 4 re-verifies the full cohort, so a fresh run is always safe; the store only avoids redoing expensive work. It is per-UTC-day (a continuation on a later day resets). Stage shapes, lifecycle, and the day-boundary reset: `references/run-state.md`.
+
 ## Step 1 — Sessionize speaker API candidates
 
 ```
@@ -27,11 +46,13 @@ For each event, extract the slug from `cfpLink` (last path segment). Skip slugs 
 python3 /home/node/.claude/skills/tessl__check-cfps/scripts/check-cfps-fetch.py
 ```
 
-Parse JSON output: `cfps`, `warnings`, `checked_at`. Merge Sessionize candidates from Step 1, dedup by slug. Tier-1 auto-approve is NOT guaranteed on name collisions; where you must choose between equivalent rows, keep the one with more complete metadata. Surface `warnings` at the top of output. Abort if script fails.
+Parse JSON output: `cfps`, `warnings`, `checked_at`. **Checkpoint:** `save fetch` (the script's stdout) before merging. Then merge Sessionize candidates from Step 1, dedup by slug. Tier-1 auto-approve is NOT guaranteed on name collisions; where you must choose between equivalent rows, keep the one with more complete metadata. Surface `warnings` at the top of output. Abort if script fails.
 
 ## Step 3 — Web search for gaps
 
 Read `/workspace/trusted/user_professional.md` for Baruch's current speaking topics. Construct 2–3 web search queries from his actual topics combined with CFP discovery terms. Add new CFPs not already in the list (dedup by conference name). Apply hard filters (no online/virtual, no excluded locations). Do not apply relevance filtering yet.
+
+**Checkpoint:** once the full candidate pool is assembled (Steps 1–3 merged and deduped), `save candidates` (the merged pool) before Step 4.
 
 **JS-rendered CFP pages.** Plain `WebFetch` often returns empty SPA shells; use the `fetch_markdown` → Cloudflare-Browser-Rendering fallback chain — see `references/web-fetch-fallback.md` (same chain applies in Steps 5 and 6).
 
@@ -53,7 +74,7 @@ Two deterministic helpers bracket a single batched MCP call — the agent does n
 python3 /home/node/.claude/skills/tessl__check-cfps/scripts/prepare-sessionize-batch.py
 ```
 
-It routes by effective source (explicit `source`, else the `cfp_url` host inference shared with `backfill-source.py`), derives each Sessionize slug, and emits `{slugs, sessionize, non_sessionize, unverifiable, counts}` — routing and slug-derivation logic in the script docstring + `references/source-routing.md`. Send `non_sessionize` ids to the branch below; `unverifiable` ids (Sessionize-sourced but no derivable slug) get the verification-failure protocol.
+It routes by effective source (explicit `source`, else the `cfp_url` host inference shared with `backfill-source.py`), derives each Sessionize slug, and emits `{slugs, sessionize, non_sessionize, unverifiable, counts}` — routing and slug-derivation logic in the script docstring + `references/source-routing.md`. **Checkpoint:** `save prep` (this output). Send `non_sessionize` ids to the branch below; `unverifiable` ids (Sessionize-sourced but no derivable slug) get the verification-failure protocol.
 
 **2. Batch-verify.** One MCP round-trip for the full cohort, not one call per slug:
 
@@ -61,7 +82,7 @@ It routes by effective source (explicit `source`, else the `cfp_url` host infere
 mcp__nanoclaw__sessionize_get_events(slugs: <slugs from step 1>)
 ```
 
-Returns one array, one entry per requested slug: `{slug, ...event fields}` or `{slug, error}`.
+Returns one array, one entry per requested slug: `{slug, ...event fields}` or `{slug, error}`. **Checkpoint:** `save sessionize_results` (this array) — it is the one non-reproducible artifact in Step 4 (a live API response), so a continuation must reload it rather than re-issue the call.
 
 **3. Apply results.** Pass `{"prep": <step-1 output>, "results": <step-2 array>}` on stdin:
 
@@ -69,7 +90,7 @@ Returns one array, one entry per requested slug: `{slug, ...event fields}` or `{
 python3 /home/node/.claude/skills/tessl__check-cfps/scripts/apply-sessionize-results.py
 ```
 
-It joins each result to its entry by `slug` (fanning one result out to **every** entry sharing it) and emits one `decision` per entry — the verdict predicates and the verbatim dismissal `bot_notes` live in the script. Apply each decision to the working set:
+It joins each result to its entry by `slug` (fanning one result out to **every** entry sharing it) and emits one `decision` per entry — **checkpoint:** `save decisions` (this output) — the verdict predicates and the verbatim dismissal `bot_notes` live in the script. Apply each decision to the working set:
 - `verified` → set `deadline` to the decision's value, mark `_verified_this_run: true`, clear the stale markers per `references/contracts.md` (`stale: false`, strip the canonical `⚠️ STALE DATA` prefix, drop `_verify_skipped`), and attach the decision's `event` fields (e.g. `expenses_covered`) in memory for Steps 5/7.
 - `dismiss` → `status: "dismissed"`, `bot_notes` = the decision's `bot_notes`.
 - `drop` → drop the new candidate.
@@ -115,6 +136,8 @@ If the prefilter exits non-zero (malformed config → exit 1, malformed records 
    - Month-year only → search for exact dates. If not found, append `"Could not verify travel conflict — exact conference dates unknown."` to `bot_notes`.
 3. Overlap with any Trip → `status: "conflict"`, append `"Travel conflict: overlaps with [Trip Name] ([start] – [end])."` to `bot_notes`.
 
+**Checkpoint:** the working set is now fully decided (verification + relevance + travel applied). `save working_set` (the in-memory entry set) before the Step 7 write — a continuation here reloads it and writes, skipping Steps 1–6.
+
 ## Step 7 — Write to cfp-state.json
 
 **Pre-write: dedup by URL.** Run the dedup script against on-disk state to collapse any two entries whose `cfp_url` normalises to the same `<host><path>` (lowercase host, scheme/query/fragment dropped, trailing `/` stripped):
@@ -151,6 +174,22 @@ Then apply priority rules (earlier wins):
    ```
 
    It stamps `schema_version: 1` on EVERY record (incl. `user_actioned`, `dismissed`, `sent`, `remind`), idempotently, and rewrites the file only when something changed. Output: `{"total": M, "stamped": N}`. A non-zero exit means the state file is missing/unreadable — surface it.
+
+10. Do NOT hand-write the top-level `_last_checked`. After stamping schema versions, run the deterministic freshness stamper — the single writer of `_last_checked`:
+
+   ```bash
+   python3 /home/node/.claude/skills/tessl__check-cfps/scripts/stamp-last-checked.py
+   ```
+
+   It sets the top-level `_last_checked` to the run timestamp unconditionally (a run that changed no record still checked, so the heartbeat must advance), touching nothing else. Output: `{"_last_checked": "<iso>"}`. A non-zero exit means the state file is missing/unreadable — surface it. Freshness lives here, not in per-record `updated`: read `_last_checked` to tell "pipeline ran" from "data unchanged."
+
+11. The run completed successfully — clear the resume checkpoint store so the next run starts fresh:
+
+   ```bash
+   python3 /home/node/.claude/skills/tessl__check-cfps/scripts/run-state.py done
+   ```
+
+   Only here, after the state write and both stampers succeeded. If an earlier step failed and you stopped, do NOT clear — the saved stages let a same-day retry resume (`references/run-state.md`).
 
 After writing cfp-state.json, emit the run's verification report inside an `<internal>` block:
 

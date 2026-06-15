@@ -1,0 +1,95 @@
+# Run-state checkpoint store — `cfp-run/`
+
+Referenced from `check-cfps` SKILL.md (Step 0 — Resume guard). Per `coding-policy: stateful-artifacts`, every stateful artifact ships a schema document next to its owner skill; this file is that document for the pipeline's resumable run-state.
+
+## Why this exists
+
+check-cfps is an agent-orchestrated pipeline — deterministic helper scripts bracket agent-only steps (the `sessionize_*` MCP calls, web search, relevance judgment), so it can't collapse into one script. Historically the agent held every stage's intermediate artifact in *context* and persisted only at Step 7. A token-limit continuation therefore lost the working set: the 2026-06-10 run blew its budget mid-pipeline, then re-derived the prep output and re-discovered the `cfp-state.json` schema from a chat summary (jbaruch/nanoclaw-conferences#4). This store gives each stage a durable, machine-readable checkpoint on disk so a continuation re-reads the last artifact instead of rebuilding it.
+
+## Path
+
+`/workspace/group/state/cfp-run/` (overrideable per-process via the `CFP_RUN_STATE_DIR` env var, used by tests). A flat directory:
+
+```
+cfp-run/
+  manifest.json        run bookkeeping
+  fetch.json           saved stage artifacts (one file per saved stage)
+  candidates.json
+  prep.json
+  sessionize_results.json
+  decisions.json
+  working_set.json
+```
+
+## Owner
+
+`tessl__check-cfps` (this skill). Written and cleared exclusively by `scripts/run-state.py`. The wrapper `nightly-cfp-sync` never touches it — it calls `check-cfps`, which manages its own run-state internally.
+
+## Reader
+
+`scripts/run-state.py load <stage>` only. No other skill or script reads these artifacts; they are scratch state for a single in-flight run, distinct from `cfp-state.json` (the durable, owned CFP data).
+
+## manifest.json shape (schema_version 1)
+
+```json
+{
+  "schema_version": 1,
+  "run_date": "2026-06-13",
+  "completed": ["fetch", "candidates", "prep"]
+}
+```
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `schema_version` | integer | yes | Currently `1`. Bump on shape change. |
+| `run_date` | string | yes | UTC date (`YYYY-MM-DD`) the run began. `begin` resumes only when this equals today; otherwise it resets. |
+| `completed` | string[] | yes | Stage names saved so far, in completion order, deduped. |
+
+## Stages
+
+The check-cfps pipeline checkpoints these stages in order. Each is the JSON artifact a step already produces — save it as soon as the step yields it, so the next continuation resumes from the first stage NOT in `completed`.
+
+| Stage | Produced after | Artifact |
+|-------|----------------|----------|
+| `fetch` | Step 2 fetch script | `check-cfps-fetch.py` stdout (`{cfps, warnings, checked_at}`) |
+| `candidates` | Steps 1–3 merge | the merged, slug-deduped candidate pool (Sessionize + fetch + web-search) |
+| `prep` | Step 4 prepare | `prepare-sessionize-batch.py` stdout (`{slugs, sessionize, non_sessionize, unverifiable, counts}`) |
+| `sessionize_results` | Step 4 MCP call | the `sessionize_get_events` array |
+| `decisions` | Step 4 apply | `apply-sessionize-results.py` stdout (`{decisions, summary}`) |
+| `working_set` | Steps 4–6 | the in-memory entry set (verified + relevance + travel applied) about to be written in Step 7 |
+
+Stage names are free-form lowercase identifiers (`[a-z0-9][a-z0-9_-]*`); the table above is the check-cfps contract, not a hard-coded enum in the script.
+
+## Commands
+
+```bash
+# Start or resume. Resets across a UTC-day boundary; resumes within the same day.
+python3 .../run-state.py begin
+# -> {"resume": false, "run_date": "2026-06-13", "completed": []}
+# -> {"resume": true,  "run_date": "2026-06-13", "completed": ["fetch", "prep"]}
+
+# Persist a stage artifact (JSON on stdin).
+echo '<artifact json>' | python3 .../run-state.py save prep
+# -> {"saved": "prep"}
+
+# Reload a saved stage on resume.
+python3 .../run-state.py load prep            # prints the artifact; exit 2 if never saved
+
+# Clear on success (end of Step 7, after the state write + stampers).
+python3 .../run-state.py done                 # -> {"cleared": true}
+```
+
+## Lifecycle
+
+- **Fresh run** — `begin` finds no manifest (or a stale `run_date`), clears any leftover files, writes a fresh manifest, returns `resume: false`. The agent runs Steps 1–7, calling `save <stage>` as each artifact appears.
+- **Resumed run** — a token-limit continuation re-invokes the skill; `begin` finds today's manifest and returns `resume: true` with `completed`. The agent `load`s each completed stage instead of recomputing it and resumes at the first uncompleted stage.
+- **Success** — Step 7 finishes the state write and stampers, then calls `done` to remove the directory. The next run starts clean.
+- **Failure** — on a technical failure the agent stops without `done`; artifacts persist so a same-day retry resumes. A retry on a later UTC day resets to a fresh full run.
+
+## Correctness vs. optimization
+
+Resume is **best-effort**, not load-bearing for correctness. Stages are idempotent and Step 4 re-verifies the full `open`/`approved` cohort every run, so a fresh full run is always safe — the checkpoint store only avoids redoing expensive work after an interruption. That is why the day-boundary reset is deliberate: a days-later continuation should start clean rather than resume a stale working set.
+
+## Why filesystem, not a `messages.db` table
+
+Same rationale as the nightly-cfp-sync cursor (`../../nightly-cfp-sync/state-schema.md`): a short-lived, single-installation, single-writer scratch artifact with no cross-row queries. The filesystem variant is greppable from a host shell (`cat`, `ls cfp-run/`) when triaging a run that didn't resume cleanly, and it is torn down on success rather than accumulating rows.

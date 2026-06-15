@@ -56,10 +56,19 @@ Every CFP record carries its own `schema_version` (currently `1`, introduced wit
 - **Other readers** (`dedup-by-url.py`, `system-audit.py`): operate on version-independent structural fields (`cfp_url`/slug dedup, script inventory), not the `matched_interests` shape, so this version does not gate them.
 - **Migration window:** a pre-#308 file has no `schema_version` on any record; until `check-cfps` next runs (nightly housekeeping or a manual invocation) the reader surfaces no CFPs. `check-cfps`'s deterministic stamper brings every record to `1` on its next run, after which the reader resumes. No data rewrite beyond the stamp is needed — absent `matched_interests` on a version-1 record is already the pinned default.
 
+## Freshness heartbeat — `_last_checked`
+
+Top-level `_`-prefixed config field (not a CFP record). The UTC ISO-8601 instant the check-cfps pipeline last ran to completion, **independent of whether any record changed** — a run that re-verified everything and changed nothing still advances it. It answers "did the pipeline run?", which per-record `updated`/`last_verified` cannot: those stay put when nothing changed, so a healthy idle pipeline looks identical to a dead one if you read them alone.
+
+- **Single writer:** `check-cfps` Step 7, via `scripts/stamp-last-checked.py` — the sole writer, run on every successful pipeline pass. No LLM hand-writing (it drifts: jbaruch/nanoclaw-conferences#4 — frozen at `2026-04-22` while records were days fresh, which read as a 7-week stall).
+- **Distinct from the wrapper cursor:** `nightly-cfp-sync-cursor.json` `last_run` records when the *wrapper* last fired (gates cadence); `_last_checked` records when *check-cfps itself* last ran, including direct (non-wrapper) invocations. Both exist on purpose.
+- A frozen `_last_checked` (older than the longest expected gap between runs) means the pipeline genuinely stopped running — a real alert, now that the field is honest.
+
 ## State format example
 
 ```json
 {
+  "_last_checked": "2026-06-13T11:36:13Z",
   "_blocked_prefixes": ["devopsdays", "blockchain", "web3", "crypto", "gaming", "unity3d", "unreal engine", "salesforce", "sap", "sharepoint"],
   "all-things-open-2026": {
     "schema_version": 1,
