@@ -60,9 +60,9 @@ Every CFP record carries its own `schema_version` (currently `1`, introduced wit
 
 Top-level `_`-prefixed config field (not a CFP record). The UTC ISO-8601 instant the check-cfps pipeline last ran to completion, **independent of whether any record changed** — a run that re-verified everything and changed nothing still advances it. It answers "did the pipeline run?", which per-record `updated`/`last_verified` cannot: those stay put when nothing changed, so a healthy idle pipeline looks identical to a dead one if you read them alone.
 
-- **Single writer:** `check-cfps` Step 7, via `scripts/stamp-last-checked.py` — the sole writer, run on every successful pipeline pass. No LLM hand-writing (it drifts: jbaruch/nanoclaw-conferences#4 — frozen at `2026-04-22` while records were days fresh, which read as a 7-week stall).
+- **Single writer:** `check-cfps` Step 7, via `scripts/stamp-last-checked.py` — the sole writer, run on every successful pipeline pass. Not LLM hand-written.
 - **Distinct from the wrapper cursor:** `nightly-cfp-sync-cursor.json` `last_run` records when the *wrapper* last fired (gates cadence); `_last_checked` records when *check-cfps itself* last ran, including direct (non-wrapper) invocations. Both exist on purpose.
-- A frozen `_last_checked` (older than the longest expected gap between runs) means the pipeline genuinely stopped running — a real alert, now that the field is honest.
+- A frozen `_last_checked` (older than the longest expected gap between runs) means the pipeline genuinely stopped running — a real alert.
 
 ## State format example
 

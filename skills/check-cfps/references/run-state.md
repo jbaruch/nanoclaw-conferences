@@ -2,9 +2,9 @@
 
 Referenced from `check-cfps` SKILL.md (Step 0 — Resume guard). Per `coding-policy: stateful-artifacts`, every stateful artifact ships a schema document next to its owner skill; this file is that document for the pipeline's resumable run-state.
 
-## Why this exists
+## Purpose
 
-check-cfps is an agent-orchestrated pipeline — deterministic helper scripts bracket agent-only steps (the `sessionize_*` MCP calls, web search, relevance judgment), so it can't collapse into one script. Historically the agent held every stage's intermediate artifact in *context* and persisted only at Step 7. A token-limit continuation therefore lost the working set: the 2026-06-10 run blew its budget mid-pipeline, then re-derived the prep output and re-discovered the `cfp-state.json` schema from a chat summary (jbaruch/nanoclaw-conferences#4). This store gives each stage a durable, machine-readable checkpoint on disk so a continuation re-reads the last artifact instead of rebuilding it.
+check-cfps is an agent-orchestrated pipeline: deterministic helper scripts bracket agent-only steps (the `sessionize_*` MCP calls, web search, relevance judgment), so it cannot collapse into one script and the agent holds intermediate artifacts across steps. This store gives each stage a durable, machine-readable checkpoint on disk, so a run interrupted by a token-limit continuation re-reads the last artifact instead of rebuilding the working set from chat history.
 
 ## Path
 
@@ -41,7 +41,7 @@ cfp-run/
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `schema_version` | integer | yes | Currently `1`. Bump on shape change. |
+| `schema_version` | integer | yes | Currently `1`. Bump on shape change. `begin` resumes only when this equals the supported version; a mismatch (future/partial shape) is treated as no usable prior run and resets. |
 | `run_date` | string | yes | UTC date (`YYYY-MM-DD`) the run began. `begin` resumes only when this equals today; otherwise it resets. |
 | `completed` | string[] | yes | Stage names saved so far, in completion order, deduped. |
 
@@ -81,7 +81,7 @@ python3 .../run-state.py done                 # -> {"cleared": true}
 
 ## Lifecycle
 
-- **Fresh run** — `begin` finds no manifest (or a stale `run_date`), clears any leftover files, writes a fresh manifest, returns `resume: false`. The agent runs Steps 1–7, calling `save <stage>` as each artifact appears.
+- **Fresh run** — `begin` finds no usable manifest (absent, unreadable, stale `run_date`, or unsupported `schema_version`), clears any leftover files, writes a fresh manifest, returns `resume: false`. The agent runs Steps 1–7, calling `save <stage>` as each artifact appears.
 - **Resumed run** — a token-limit continuation re-invokes the skill; `begin` finds today's manifest and returns `resume: true` with `completed`. The agent `load`s each completed stage instead of recomputing it and resumes at the first uncompleted stage.
 - **Success** — Step 7 finishes the state write and stampers, then calls `done` to remove the directory. The next run starts clean.
 - **Failure** — on a technical failure the agent stops without `done`; artifacts persist so a same-day retry resumes. A retry on a later UTC day resets to a fresh full run.

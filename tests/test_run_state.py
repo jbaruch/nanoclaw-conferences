@@ -143,6 +143,27 @@ def test_begin_resets_on_corrupt_manifest(run_state, capsys):
     assert _manifest(run_dir)["completed"] == []
 
 
+def test_begin_resets_on_unsupported_schema_version(run_state, monkeypatch, capsys):
+    module, run_dir = run_state
+    day = datetime(2026, 6, 15, 9, 0, 0, tzinfo=timezone.utc)
+    _freeze(module, monkeypatch, day)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    # A future shape on today's date must NOT resume — the reader does not
+    # migrate; it treats an unsupported version as no usable prior run.
+    (run_dir / "manifest.json").write_text(
+        json.dumps({"schema_version": 999, "run_date": "2026-06-15", "completed": ["fetch"]}),
+        encoding="utf-8",
+    )
+
+    rc = module.main(["begin"])
+    out = _out(capsys)
+
+    assert rc == 0
+    assert out["resume"] is False
+    assert out["completed"] == []
+    assert _manifest(run_dir)["schema_version"] == module.SCHEMA_VERSION
+
+
 def test_load_absent_stage_exits_2(run_state, capsys):
     module, _ = run_state
     module.main(["begin"])
@@ -208,6 +229,22 @@ def test_save_non_json_exits_1(run_state, monkeypatch, capsys):
 
     assert rc == 1
     assert "not valid JSON" in captured.err
+
+
+def test_write_failure_exits_1(run_state, monkeypatch, capsys):
+    module, _ = run_state
+
+    def _boom(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(module, "_atomic_write_json", _boom)
+
+    rc = module.main(["begin"])
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "begin failed" in captured.err
+    assert "disk full" in captured.err
 
 
 if __name__ == "__main__":

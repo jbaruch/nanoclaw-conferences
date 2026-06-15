@@ -4,6 +4,12 @@ All notable changes to this tile are documented here.
 
 ## Unreleased
 
+### Added
+
+- `check-cfps` now stamps an honest freshness heartbeat and resumes interrupted runs from disk (`jbaruch/nanoclaw-conferences#4`).
+  - **Freshness:** new deterministic `scripts/stamp-last-checked.py` is the single writer of `cfp-state.json`'s top-level `_last_checked`, run in Step 7 on every successful pass. It stamps the run timestamp unconditionally (a run that re-verified everything and changed nothing still "checked"). Replaces LLM hand-writing, which had left the field frozen at `2026-04-22` while every record had refreshed days earlier — on 2026-06-13 that stale field drove a wrong "pipeline stalled ~7 weeks" live diagnosis when the pipeline was in fact healthy (running on its ~72h cadence). `_last_checked` is distinct from the wrapper's `nightly-cfp-sync-cursor.json` `last_run` (which gates cadence); both exist on purpose.
+  - **Resumability:** new `scripts/run-state.py` checkpoint store persists each pipeline stage artifact (`fetch`, `candidates`, `prep`, `sessionize_results`, `decisions`, `working_set`) under `/workspace/group/state/cfp-run/`, with a Step 0 resume guard and clear-on-success teardown in the SKILL. Motivated by the 2026-06-10 run, a token-limit continuation that had hand-rolled the whole pipeline inline, blew its budget mid-run, and — finding its prep output was never persisted — re-derived it and re-discovered the `cfp-state.json` schema from a chat summary. The store is per-UTC-day (a continuation on a later day resets to a fresh run); resume is best-effort since Step 4 re-verifies the full cohort, so a fresh full run is always safe.
+
 ### Changed
 
 - Reworded `skills/check-cfps/references/web-fetch-fallback.md` to describe `fetch_markdown` as the NanoClaw host's server-side renderer in neutral terms, dropping the `snitchmd` / `CloakBrowser` / "past anti-bot gates" wording the registry's intent-review moderation repeatedly misread as an attacker-proxy prompt-injection (false positive — these are first-party NanoClaw rendering services). Behavior is unchanged: same `fetch_markdown`-then-Composio fallback chain. Also dropped the cross-tile reference to the admin-only `max-effort` skill so the public tile is self-contained. Ends the per-publish moderation-override treadmill for this tile.

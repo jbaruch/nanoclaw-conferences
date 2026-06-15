@@ -8,8 +8,10 @@ read as a 7-week pipeline stall):
     a file with no CFP records still gets stamped (a run that changed nothing
     still checked).
   - Touches only `_last_checked` — every CFP record and other `_`-config key
-    is preserved byte-for-byte, non-ASCII included.
-  - Missing / corrupt / non-dict-root state exits 1 with a stderr diagnostic.
+    is preserved (semantic JSON equality; the file is re-serialized, so byte
+    layout may differ), non-ASCII included.
+  - Missing / corrupt / non-dict-root state, and write failures, exit 1 with
+    a stderr diagnostic.
 """
 
 import json
@@ -156,6 +158,24 @@ def test_non_dict_root_exits_1(stamp_last_checked, tmp_path, capsys):
 
     assert rc == 1
     assert "expected a JSON object" in captured.err
+
+
+def test_write_failure_exits_1(stamp_last_checked, monkeypatch, tmp_path, capsys):
+    _freeze(stamp_last_checked, monkeypatch)
+    state_path = tmp_path / "cfp-state.json"
+    state_path.write_text(json.dumps({"a-2026": {"status": "open"}}), encoding="utf-8")
+
+    def _boom(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(stamp_last_checked, "_atomic_write_json", _boom)
+
+    rc = stamp_last_checked.main(["--state", str(state_path)])
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "cannot write" in captured.err
+    assert str(state_path) in captured.err
 
 
 if __name__ == "__main__":

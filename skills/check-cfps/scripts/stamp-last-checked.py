@@ -94,7 +94,13 @@ def main(argv=None):
 
     now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     state["_last_checked"] = now
-    _atomic_write_json(args.state, state)
+    try:
+        _atomic_write_json(args.state, state)
+    except OSError as exc:
+        sys.stderr.write(
+            f"stamp-last-checked: cannot write {args.state}: {type(exc).__name__}: {exc}\n"
+        )
+        return 1
     print(json.dumps({"_last_checked": now}))
     return 0
 

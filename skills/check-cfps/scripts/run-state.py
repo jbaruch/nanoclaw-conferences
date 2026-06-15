@@ -134,6 +134,7 @@ def cmd_begin(run_dir: Path) -> int:
     manifest = _read_manifest(run_dir)
     if (
         manifest is not None
+        and manifest.get("schema_version") == SCHEMA_VERSION
         and manifest.get("run_date") == today
         and isinstance(manifest.get("completed"), list)
     ):
@@ -230,14 +231,22 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     run_dir = _run_dir()
-    if args.command == "begin":
-        return cmd_begin(run_dir)
-    if args.command == "save":
-        return cmd_save(run_dir, args.stage)
-    if args.command == "load":
-        return cmd_load(run_dir, args.stage)
-    # `done` — the only remaining branch under a required subparser.
-    return cmd_done(run_dir)
+    # Catch write/remove/mkdir failures from any subcommand so the process
+    # contract is explicit (exit 1 + stderr diagnostic) rather than an
+    # accidental traceback per `coding-policy: script-delegation`. cmd_load's
+    # own read handling returns 2/1 before reaching here.
+    try:
+        if args.command == "begin":
+            return cmd_begin(run_dir)
+        if args.command == "save":
+            return cmd_save(run_dir, args.stage)
+        if args.command == "load":
+            return cmd_load(run_dir, args.stage)
+        # `done` — the only remaining branch under a required subparser.
+        return cmd_done(run_dir)
+    except OSError as exc:
+        sys.stderr.write(f"run-state: {args.command} failed: {type(exc).__name__}: {exc}\n")
+        return 1
 
 
 if __name__ == "__main__":
