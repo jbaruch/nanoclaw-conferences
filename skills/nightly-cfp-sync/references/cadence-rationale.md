@@ -8,4 +8,4 @@ CFP deadlines move on a multi-day horizon, so refreshing `cfp-state.json` period
 
 ## Run ordering vs travel-schedule
 
-check-cfps Step 6 reads `/workspace/group/travel-schedule.json` for its travel-conflict check. When the `nanoclaw-flight-assist` overlay is co-loaded, its travel-sync wrapper refreshes that file on an earlier cron slot, so this wrapper usually sees fresh data. The coupling is loose: check-cfps degrades gracefully when the schedule is stale or a conference's exact dates are unknown, and the wrappers gate independently — no hard ordering dependency exists.
+check-cfps Step 7 reads `/workspace/group/travel-schedule.json` for its travel-conflict check. When the `nanoclaw-flight-assist` overlay is co-loaded, its travel-sync wrapper refreshes that file on an earlier cron slot, so this wrapper usually sees fresh data. The coupling is loose: check-cfps degrades gracefully when the schedule is stale or a conference's exact dates are unknown, and the wrappers gate independently — no hard ordering dependency exists.

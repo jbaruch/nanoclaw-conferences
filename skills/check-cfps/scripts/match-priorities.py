@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Propose priority-interest matches for CFP records (check-cfps Step 5).
+"""Propose priority-interest matches for CFP records (check-cfps Step 6).
 
 PATH C of jbaruch/nanoclaw-admin#308. The priority tagging in
-`check-cfps` Step 5 is LLM judgment ("hints, not gates"), but under
+`check-cfps` Step 6 is LLM judgment ("hints, not gates"), but under
 budget pressure the agent degraded to a buggy heuristic and missed
 obvious matches:
 
@@ -26,7 +26,7 @@ deliberately does NOT:
 - add a match a CFP earns by content alone with no keyword/source hit
   (world knowledge — e.g. "Confitura is a Polish Java conference").
 
-`check-cfps` Step 5 takes `proposed_interests` as a strong prior, then
+`check-cfps` Step 6 takes `proposed_interests` as a strong prior, then
 REMOVES entries a `note`/description contradicts and ADDS no-hit matches
 by judgment, recording the arbitrated set as `matched_interests`.
 
@@ -59,7 +59,7 @@ from pathlib import Path
 
 # Keywords at or below this length match on a word boundary, not as a
 # raw substring — otherwise "ai" hits "rails" and "ml" hits "html",
-# swamping Step 5 with spurious proposals (Copilot, jbaruch/nanoclaw-admin#308).
+# swamping Step 6 with spurious proposals (Copilot, jbaruch/nanoclaw-admin#308).
 # Longer keywords keep substring matching so "java" still hits "JavaCro".
 SHORT_KEYWORD_MAXLEN = 3
 

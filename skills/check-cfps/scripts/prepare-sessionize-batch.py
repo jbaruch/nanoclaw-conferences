@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Prepare the Sessionize batch for check-cfps Step 4.
+"""Prepare the Sessionize batch for check-cfps Step 5.
 
-Given the entries Step 4 must verify (new candidates from Steps 1-3 plus
+Given the entries Step 5 must verify (new candidates from Steps 2-4 plus
 stored `open`/`approved` rows), this script decides — deterministically —
 which ones are Sessionize-sourced, derives each one's Sessionize slug, and
 emits the unique slug list to hand to the `sessionize_get_events` MCP call
@@ -14,7 +14,7 @@ source of truth for the host table). Only entries whose effective source
 is `sessionize-speaker-api` are batched; everything else is the agent's
 non-Sessionize branch.
 
-Slug derivation: a new candidate already carries its slug (from Step 1);
+Slug derivation: a new candidate already carries its slug (from Step 2);
 a stored entry's slug is the first path segment of `cfp_url`
 (`urlparse(cfp_url).path.strip("/").split("/")[0]`), NOT its dict key,
 which drifts from the URL slug. A Sessionize entry whose `cfp_url` is
@@ -74,7 +74,7 @@ def effective_source(entry: dict) -> str | None:
 
 def derive_slug(entry: dict) -> str | None:
     """The slug for an entry. A new candidate's own `slug` is authoritative
-    (Step 1 extracted it from cfpLink); a stored row's slug is ALWAYS the
+    (Step 2 extracted it from cfpLink); a stored row's slug is ALWAYS the
     first `cfp_url` path segment — never a passed-in `slug`, which may be the
     drifted dict key and would 404. None when no slug can be derived."""
     if entry.get("cohort") == "new":

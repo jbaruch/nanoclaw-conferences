@@ -12,7 +12,7 @@ heuristic had:
 
 And the contract boundaries: the script proposes on a keyword/source
 hit but never applies a `note` exclusion or adds a no-hit match — those
-stay LLM judgment in Step 5.
+stay LLM judgment in Step 6.
 """
 
 from __future__ import annotations
@@ -134,7 +134,7 @@ def test_case_insensitive(matcher, priorities_file, monkeypatch, capsys):
 
 def test_agentcon_proposed_despite_note(matcher, priorities_file, monkeypatch, capsys):
     """The script proposes `agentcon` on the keyword hit; honoring the
-    `note`'s geo exclusion is the LLM's job in Step 5, not this script's.
+    `note`'s geo exclusion is the LLM's job in Step 6, not this script's.
     `ai` is also proposed because the `agent` keyword is a substring of
     "AgentCon" — the prefilter proposes liberally and the LLM prunes."""
     rec = {"name": "AgentCon Lagos 2026"}
@@ -167,7 +167,7 @@ def test_long_keyword_still_substring(matcher, priorities_file, monkeypatch, cap
 
 def test_no_keyword_or_source_hit_proposes_empty(matcher, priorities_file, monkeypatch, capsys):
     """Confitura: no keyword, source not in any list. The script proposes
-    nothing; the LLM adds `java` by world knowledge in Step 5."""
+    nothing; the LLM adds `java` by world knowledge in Step 6."""
     rec = {"name": "Confitura 2026", "source": "developers.events"}
     _, out, _ = _run(matcher, monkeypatch, capsys, [rec], priorities_file)
     assert json.loads(out)[0]["proposed_interests"] == []

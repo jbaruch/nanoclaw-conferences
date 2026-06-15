@@ -1,6 +1,6 @@
 """Tests for skills/check-cfps/scripts/apply-sessionize-results.py.
 
-Contract (Step 4 result application):
+Contract (Step 5 result application):
   - cfp_open False -> drop (new) / dismiss-MISSED (stored).
   - is_online True -> drop (new) / dismiss-online (stored).
   - otherwise -> verified, deadline = cfp_end_local[:10].
@@ -109,7 +109,7 @@ def test_malformed_success_without_cfp_end_local_is_verify_failed(
     apply_sessionize_results,
 ):
     # Open + in-person but no usable CFP end date: don't stamp a verified
-    # (null-deadline) decision that would let Step 7 advance last_verified
+    # (null-deadline) decision that would let Step 8 advance last_verified
     # on an unreadable response.
     out = apply_sessionize_results.apply_results(
         _prep([{"id": "s6", "cohort": "stored", "slug": "weird"}]),

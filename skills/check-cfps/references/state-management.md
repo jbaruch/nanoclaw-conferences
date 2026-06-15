@@ -28,7 +28,7 @@ Record Baruch's dismissal reason in `baruch_notes`. When a deadline expires with
 
 ## Priority interests
 
-`matched_interests` is an orthogonal axis to `status` (jbaruch/nanoclaw-admin#308). Step 5 judges each `open`/`approved` CFP against the operator-owned priority list and records the matched interest `id`s. The morning brief partitions on this field: a non-empty list OR an absent field → pinned brief; an explicit empty list `[]` → separate non-pinned follow-up. The absent-vs-empty distinction is load-bearing — never normalise absent to `[]`.
+`matched_interests` is an orthogonal axis to `status` (jbaruch/nanoclaw-admin#308). Step 6 judges each `open`/`approved` CFP against the operator-owned priority list and records the matched interest `id`s. The morning brief partitions on this field: a non-empty list OR an absent field → pinned brief; an explicit empty list `[]` → separate non-pinned follow-up. The absent-vs-empty distinction is load-bearing — never normalise absent to `[]`.
 
 Priorities live at `/workspace/group/cfp-priorities.json` — operator-owned, same provenance as `RELEVANCE-CRITERIA.md`, NOT shipped in the tile. The interest taxonomy is data, not code: edit this file to change what's priority (drop Java, add Rust) with no skill or schema change. Each interest carries `id`, `label`, `keywords`, `sources`, and an optional free-text `note`. Shape:
 
@@ -43,23 +43,32 @@ Priorities live at `/workspace/group/cfp-priorities.json` — operator-owned, sa
 }
 ```
 
-`keywords` and `sources` are hints for the Step 5 judgment, not literal match gates. The optional `note` is authoritative operator intent the judgment honors — use it for rules `keywords`/`sources` can't express (geo scoping, source-scoped topic filters); a `note` constraint can EXCLUDE an otherwise-matching keyword/source hit. Missing or empty file ⇒ Step 5 tags nothing AND clears `matched_interests` from the non-`user_actioned` entries it processes ⇒ the brief pins everything (no policy, no split). The clear matters: an entry that earned `[]` under a prior config would otherwise stay demoted after the config is removed.
+`keywords` and `sources` are hints for the Step 6 judgment, not literal match gates. The optional `note` is authoritative operator intent the judgment honors — use it for rules `keywords`/`sources` can't express (geo scoping, source-scoped topic filters); a `note` constraint can EXCLUDE an otherwise-matching keyword/source hit. Missing or empty file ⇒ Step 6 tags nothing AND clears `matched_interests` from the non-`user_actioned` entries it processes ⇒ the brief pins everything (no policy, no split). The clear matters: an entry that earned `[]` under a prior config would otherwise stay demoted after the config is removed.
 
-Tagging is two-stage (jbaruch/nanoclaw-admin#308): the deterministic prefilter `scripts/match-priorities.py` consumes CFP records and emits each one's `proposed_interests`; Step 5's LLM then arbitrates — REMOVE what a `note` excludes or the description contradicts, ADD content-only matches with no proposal (e.g. "Confitura" → `java`). The prefilter never applies `note` exclusions or no-hit additions; those are judgment. The matching predicates are the script's contract — see the `match-priorities.py` top-of-file docstring.
+Tagging is two-stage (jbaruch/nanoclaw-admin#308): the deterministic prefilter `scripts/match-priorities.py` consumes CFP records and emits each one's `proposed_interests`; Step 6's LLM then arbitrates — REMOVE what a `note` excludes or the description contradicts, ADD content-only matches with no proposal (e.g. "Confitura" → `java`). The prefilter never applies `note` exclusions or no-hit additions; those are judgment. The matching predicates are the script's contract — see the `match-priorities.py` top-of-file docstring.
 
 ## Schema version & ownership
 
 Every CFP record carries its own `schema_version` (currently `1`, introduced with `matched_interests` in jbaruch/nanoclaw-admin#308) so a shape change is auditable per `coding-policy: stateful-artifacts`.
 
-- **Owner / single writer-migrator:** `check-cfps`. Its Step 7 write phase runs `scripts/stamp-schema-version.py` — a deterministic, idempotent stamper that sets `schema_version` on EVERY record (incl. `user_actioned`, `dismissed`, `sent`), so one run reliably migrates the whole file (replacing LLM hand-stamping). `schema_version` is the one owner-metadata field exempt from the "preserve `user_actioned` entirely" rule; the user-owned decision fields stay untouched. The same run reconciles `matched_interests` (tag, clear, or preserve per the rules above).
+- **Owner / single writer-migrator:** `check-cfps`. Its Step 8 write phase runs `scripts/stamp-schema-version.py` — a deterministic, idempotent stamper that sets `schema_version` on EVERY record (incl. `user_actioned`, `dismissed`, `sent`), so one run reliably migrates the whole file (replacing LLM hand-stamping). `schema_version` is the one owner-metadata field exempt from the "preserve `user_actioned` entirely" rule; the user-owned decision fields stay untouched. The same run reconciles `matched_interests` (tag, clear, or preserve per the rules above).
 - **Reader** (`morning-brief-cfp.py`): a non-owner reader. Per `stateful-artifacts`, a record whose `schema_version != 1` (including a legacy record with no version) is "no usable prior state" — skipped, not surfaced, until `check-cfps` migrates it. The reader never migrates; it tallies skipped records to stderr. `--mark-shown` only touches records that passed the gate and preserves their `schema_version` in place.
 - **Other readers** (`dedup-by-url.py`, `system-audit.py`): operate on version-independent structural fields (`cfp_url`/slug dedup, script inventory), not the `matched_interests` shape, so this version does not gate them.
 - **Migration window:** a pre-#308 file has no `schema_version` on any record; until `check-cfps` next runs (nightly housekeeping or a manual invocation) the reader surfaces no CFPs. `check-cfps`'s deterministic stamper brings every record to `1` on its next run, after which the reader resumes. No data rewrite beyond the stamp is needed — absent `matched_interests` on a version-1 record is already the pinned default.
+
+## Freshness heartbeat — `_last_checked`
+
+Top-level `_`-prefixed config field (not a CFP record). The UTC ISO-8601 instant the check-cfps pipeline last ran to completion, **independent of whether any record changed** — a run that re-verified everything and changed nothing still advances it. It answers "did the pipeline run?", which per-record `updated`/`last_verified` cannot: those stay put when nothing changed, so a healthy idle pipeline looks identical to a dead one if you read them alone.
+
+- **Single writer:** `check-cfps` Step 8, via `scripts/stamp-last-checked.py` — the sole writer, run on every successful pipeline pass. Not LLM hand-written.
+- **Distinct from the wrapper cursor:** `nightly-cfp-sync-cursor.json` `last_run` records when the *wrapper* last fired (gates cadence); `_last_checked` records when *check-cfps itself* last ran, including direct (non-wrapper) invocations. Both exist on purpose.
+- A frozen `_last_checked` (older than the longest expected gap between runs) means the pipeline genuinely stopped running — a real alert.
 
 ## State format example
 
 ```json
 {
+  "_last_checked": "2026-06-13T11:36:13Z",
   "_blocked_prefixes": ["devopsdays", "blockchain", "web3", "crypto", "gaming", "unity3d", "unreal engine", "salesforce", "sap", "sharepoint"],
   "all-things-open-2026": {
     "schema_version": 1,

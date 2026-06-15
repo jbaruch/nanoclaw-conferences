@@ -4,7 +4,7 @@
 Two ingestion branches (Sessionize speaker-API vs developers.events) can
 derive different dict keys for the same conference when the underlying
 CFP url is identical (e.g. `codemotion-milan-26` vs `codemotion-milan-2026`
-both pointing at `https://sessionize.com/codemotion-milan-26`). Step 7's
+both pointing at `https://sessionize.com/codemotion-milan-26`). Step 8's
 writer keys state by slug, so both rows persist and morning-brief-cfp
 renders the conference twice with separate verification timelines.
 
@@ -184,7 +184,7 @@ def dedup(state: dict) -> dict:
         winner_actioned = winner_entry.get("user_actioned") is True
         winner_sticky = winner_entry.get("shown_in_brief") is True
         # Both user_actioned and shown_in_brief carry bot_notes
-        # preservation guarantees (the latter per the Step 7 sticky
+        # preservation guarantees (the latter per the Step 8 sticky
         # rule in SKILL.md). Skip the merge when either applies.
         skip_notes_merge = winner_actioned or winner_sticky
         winner_notes = winner_entry.get("bot_notes") or ""
@@ -242,8 +242,8 @@ def _atomic_write(target: Path, state: dict) -> None:
 def lookup(state: dict, candidate_urls: list[str]) -> dict[str, str | None]:
     """Map each candidate URL to the existing state slug whose
     `cfp_url` normalises to the same `<host><path>`, or `None` when no
-    state entry collides. Used by Step 7 of `check-cfps` after the
-    in-place dedup pass: in-memory candidates from Steps 1–3 may have
+    state entry collides. Used by Step 8 of `check-cfps` after the
+    in-place dedup pass: in-memory candidates from Steps 2–4 may have
     been derived to slugs that differ from existing-state keys, so
     the skill renames each candidate to its colliding state key (if
     any) before applying the priority rules below. Pulling this out
@@ -303,7 +303,7 @@ def main(argv: list[str]) -> int:
         help=(
             "Read newline-separated candidate URLs from stdin (blank lines "
             "skipped) and emit `{<input_url>: <existing_slug_or_null>}` JSON "
-            "to stdout instead of running the dedup pass. Used by Step 7 of "
+            "to stdout instead of running the dedup pass. Used by Step 8 of "
             "check-cfps to delegate the deterministic candidate-key rewrite "
             "to the script per coding-policy: script-delegation."
         ),

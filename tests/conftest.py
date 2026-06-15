@@ -117,6 +117,40 @@ def prepare_sessionize_batch():
 
 
 @pytest.fixture
+def stamp_last_checked():
+    """Load check-cfps/scripts/stamp-last-checked.py.
+
+    The script reads the state file path from `--state` (CLI arg) at main()
+    time — no module-level paths to monkeypatch. Tests pass the path via the
+    argv list to `module.main([...])` and capture stdout/stderr via capsys.
+    The run timestamp comes from `module.datetime.now(timezone.utc)`; tests
+    that assert the exact stamp monkeypatch `module.datetime` with a frozen
+    subclass (same idiom as test_check_cfps_fetch's `checked_at`)."""
+    return _load(
+        "stamp_last_checked_under_test",
+        "skills/check-cfps/scripts/stamp-last-checked.py",
+    )
+
+
+@pytest.fixture
+def run_state(tmp_path, monkeypatch):
+    """Load check-cfps/scripts/run-state.py with the run directory pinned
+    under tmp_path via the `CFP_RUN_STATE_DIR` env override the script reads.
+
+    Returns (module, run_dir). The dir is NOT created up front so callers
+    can exercise the absent-store path. `run_date` comes from
+    `module.datetime.now(timezone.utc)`; tests that cross a day boundary
+    monkeypatch `module.datetime` with a frozen subclass."""
+    run_dir = tmp_path / "cfp-run"
+    monkeypatch.setenv("CFP_RUN_STATE_DIR", str(run_dir))
+    module = _load(
+        "run_state_under_test",
+        "skills/check-cfps/scripts/run-state.py",
+    )
+    return module, run_dir
+
+
+@pytest.fixture
 def apply_sessionize_results():
     """Load check-cfps/scripts/apply-sessionize-results.py.
 

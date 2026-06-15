@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
-"""Deterministic schema_version stamper for cfp-state.json (owner migration).
+"""Deterministic freshness stamper for cfp-state.json's `_last_checked`.
 
-`check-cfps` is the owner skill for `cfp-state.json` per
-`coding-policy: stateful-artifacts`. It runs this after writing the state in
-Step 8 to stamp `schema_version` on every record, replacing unreliable LLM
-hand-stamping: a single deterministic run brings the whole file to the
-current version so `morning-brief-cfp.py`'s reader gate (skip
-`schema_version != SUPPORTED`) admits every record.
+`check-cfps` is the owner skill for `cfp-state.json`. The top-level
+`_last_checked` field is the pipeline's freshness heartbeat: the wall-clock
+instant the check-cfps pipeline last ran to completion, independent of
+whether any record changed. LLM hand-writing left it frozen — on
+2026-06-13 it still read `2026-04-22` while every record had refreshed days
+earlier, which drove a wrong "pipeline stalled ~7 weeks" diagnosis
+(jbaruch/nanoclaw-conferences#4). Stamping it deterministically in Step 8
+makes freshness honest and observable.
 
-Skips `_`-prefixed config keys (e.g. `_blocked_prefixes`) and any non-dict
-value. Idempotent: a record already at SUPPORTED_SCHEMA_VERSION is untouched,
-and the file is rewritten only when at least one record changed. Atomic write
+Unlike `stamp-schema-version.py` (idempotent, rewrites only on change),
+this script writes unconditionally: a run that changed no record still
+checked, so the heartbeat must advance. It sets ONLY the top-level
+`_last_checked` key (a `_`-prefixed config field, not a CFP record) and
+leaves every record and other config key untouched. Atomic write
 (temp + fsync + os.replace, UTF-8, mode-preserving) so an interrupted run
 can't truncate the state file.
 
-Output (stdout): JSON `{"total": M, "stamped": N}` — M record dicts seen,
-N newly stamped this run. Exit 0 on success; exit non-zero with a stderr
-diagnostic when cfp-state.json is missing / unreadable / not a JSON object.
+Output (stdout): JSON `{"_last_checked": "<iso>"}` — the UTC ISO-8601
+timestamp (literal `Z` suffix) just written. Exit 0 on success; exit
+non-zero with a stderr diagnostic when cfp-state.json is missing /
+unreadable / not a JSON object.
 """
 
 import argparse
@@ -24,10 +29,10 @@ import json
 import os
 import sys
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 DEFAULT_STATE_PATH = Path("/workspace/group/cfp-state.json")
-SUPPORTED_SCHEMA_VERSION = 1
 
 
 def _atomic_write_json(path, payload):
@@ -66,24 +71,9 @@ def _atomic_write_json(path, payload):
                 pass
 
 
-def stamp(state):
-    """Stamp SUPPORTED_SCHEMA_VERSION on every record dict in-place. Returns
-    (total_records, newly_stamped)."""
-    total = 0
-    stamped = 0
-    for slug, entry in state.items():
-        if slug.startswith("_") or not isinstance(entry, dict):
-            continue
-        total += 1
-        if entry.get("schema_version") != SUPPORTED_SCHEMA_VERSION:
-            entry["schema_version"] = SUPPORTED_SCHEMA_VERSION
-            stamped += 1
-    return total, stamped
-
-
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Stamp schema_version on every cfp-state record (owner migration)."
+        description="Stamp top-level _last_checked on cfp-state.json with the run timestamp."
     )
     parser.add_argument("--state", type=Path, default=DEFAULT_STATE_PATH)
     args = parser.parse_args(argv)
@@ -92,20 +82,26 @@ def main(argv=None):
         state = json.loads(args.state.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         sys.stderr.write(
-            f"stamp-schema-version: cannot read {args.state}: " f"{type(exc).__name__}: {exc}\n"
+            f"stamp-last-checked: cannot read {args.state}: {type(exc).__name__}: {exc}\n"
         )
         return 1
     if not isinstance(state, dict):
         sys.stderr.write(
-            f"stamp-schema-version: {args.state} root is "
+            f"stamp-last-checked: {args.state} root is "
             f"{type(state).__name__}, expected a JSON object\n"
         )
         return 1
 
-    total, stamped = stamp(state)
-    if stamped:
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    state["_last_checked"] = now
+    try:
         _atomic_write_json(args.state, state)
-    print(json.dumps({"total": total, "stamped": stamped}))
+    except OSError as exc:
+        sys.stderr.write(
+            f"stamp-last-checked: cannot write {args.state}: {type(exc).__name__}: {exc}\n"
+        )
+        return 1
+    print(json.dumps({"_last_checked": now}))
     return 0
 
 
