@@ -7,7 +7,7 @@ instant the check-cfps pipeline last ran to completion, independent of
 whether any record changed. LLM hand-writing left it frozen — on
 2026-06-13 it still read `2026-04-22` while every record had refreshed days
 earlier, which drove a wrong "pipeline stalled ~7 weeks" diagnosis
-(jbaruch/nanoclaw-conferences#4). Stamping it deterministically in Step 7
+(jbaruch/nanoclaw-conferences#4). Stamping it deterministically in Step 8
 makes freshness honest and observable.
 
 Unlike `stamp-schema-version.py` (idempotent, rewrites only on change),

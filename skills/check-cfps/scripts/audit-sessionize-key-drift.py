@@ -2,7 +2,7 @@
 """Audit cfp-state.json for sessionize-sourced entries whose dict key
 has drifted from the canonical URL slug.
 
-Step 4's Sessionize branch derives the slug from `cfp_url`'s first path
+Step 5's Sessionize branch derives the slug from `cfp_url`'s first path
 segment, but the dict key was historically used as the slug. Drift
 patterns observed in the 2026-05-03 audit (closes
 `jbaruch/nanoclaw-admin#192`):

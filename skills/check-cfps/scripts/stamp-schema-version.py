@@ -3,7 +3,7 @@
 
 `check-cfps` is the owner skill for `cfp-state.json` per
 `coding-policy: stateful-artifacts`. It runs this after writing the state in
-Step 7 to stamp `schema_version` on every record, replacing unreliable LLM
+Step 8 to stamp `schema_version` on every record, replacing unreliable LLM
 hand-stamping: a single deterministic run brings the whole file to the
 current version so `morning-brief-cfp.py`'s reader gate (skip
 `schema_version != SUPPORTED`) admits every record.

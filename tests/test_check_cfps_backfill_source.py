@@ -4,7 +4,7 @@ Locks down the script's documented contract:
   - Idempotent: running on already-sourced entries leaves them alone.
   - Source inferred from cfp_url host (sessionize.com / developers.events
     / javaconferences.org), including subdomains.
-  - Unknown / missing host leaves entry unsourced (Step 4 will treat
+  - Unknown / missing host leaves entry unsourced (Step 5 will treat
     unsourced as non-Sessionize, the safe default).
   - Underscore-prefixed keys (e.g. _blocked_prefixes) are skipped.
   - Non-dict entry shapes are skipped without crashing.
@@ -199,7 +199,7 @@ def test_infer_javaconferences(backfill_source, tmp_path, capsys):
 
 def test_unknown_host_left_unsourced(backfill_source, tmp_path, capsys):
     """A host that doesn't match any known feed → entry stays
-    unsourced. Step 4's non-Sessionize branch is the safe default
+    unsourced. Step 5's non-Sessionize branch is the safe default
     here; nothing in this script should guess a source from a host
     it doesn't recognize."""
     state_path = tmp_path / "cfp-state.json"

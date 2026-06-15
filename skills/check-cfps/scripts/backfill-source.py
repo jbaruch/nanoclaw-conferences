@@ -6,7 +6,7 @@ Inspects each slug's `cfp_url` host and assigns:
   developers.events (any subdomain)      -> "developers.events"
   javaconferences.org (any subdomain)    -> "javaconferences.org"
 
-Entries whose host doesn't match any known feed are left unsourced; Step 4
+Entries whose host doesn't match any known feed are left unsourced; Step 5
 treats unsourced entries as non-Sessionize and skips the live API call (the
 safe default — won't false-stale).
 

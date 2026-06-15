@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Apply check-cfps Step 4 Sessionize batch results to the entries.
+"""Apply check-cfps Step 5 Sessionize batch results to the entries.
 
 Consumes the `prepare-sessionize-batch.py` join table plus the array
 returned by the `sessionize_get_events` MCP call and emits one
 deterministic decision per Sessionize entry. The decision logic mirrors
-the Step 4 contract:
+the Step 5 contract:
 
   * result missing for a slug, or `{slug, error}`  -> verify_failed
     (caller applies the verification-failure protocol in
@@ -16,7 +16,7 @@ the Step 4 contract:
   * is_online is True  -> new candidate: drop; stored entry: dismiss with
     bot_notes "Dismissed: online/virtual event."
   * otherwise          -> verified, with the refreshed deadline
-    (cfp_end_local[:10]) carried back for Steps 5/7 — UNLESS the success
+    (cfp_end_local[:10]) carried back for Steps 6/8 — UNLESS the success
     payload has no usable `cfp_end_local` (missing / non-string), which is
     treated as verify_failed rather than stamping a null-deadline verified.
 
@@ -27,11 +27,11 @@ get the same verdict and no duplicate is left unverified. Entries flagged
 carry their cohort and are emitted as verify_failed.
 
 A `verified` decision carries the full Sessionize `event` so the caller
-attaches `expenses_covered` and the other event fields for Steps 5/7
+attaches `expenses_covered` and the other event fields for Steps 6/8
 without re-joining results to entries.
 
 This script is pure: it computes decisions only and writes nothing to
-cfp-state.json. Step 7 remains the sole writer.
+cfp-state.json. Step 8 remains the sole writer.
 
 Input (stdin, JSON object):
   {"prep": <output of prepare-sessionize-batch.py>,
@@ -104,7 +104,7 @@ def decide(entry: dict, result: dict | None) -> dict:
     cfp_end_local = result.get("cfp_end_local")
     if not isinstance(cfp_end_local, str) or not cfp_end_local:
         # Open, in-person, but no usable CFP end date — a malformed success.
-        # Refusing to mark it verified keeps Step 7 from stamping
+        # Refusing to mark it verified keeps Step 8 from stamping
         # `last_verified` on a response we couldn't actually read.
         return {"id": entry_id, "cohort": cohort, "action": "verify_failed"}
     return {
@@ -114,7 +114,7 @@ def decide(entry: dict, result: dict | None) -> dict:
         "deadline": _date10(cfp_end_local),
         "cfp_end_local": cfp_end_local,
         # Carry the full event back so the caller attaches `expenses_covered`
-        # and friends for Steps 5/7 without re-joining results to entries.
+        # and friends for Steps 6/8 without re-joining results to entries.
         "event": result,
     }
 

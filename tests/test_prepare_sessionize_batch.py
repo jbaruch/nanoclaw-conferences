@@ -1,6 +1,6 @@
 """Tests for skills/check-cfps/scripts/prepare-sessionize-batch.py.
 
-Contract (Step 4 batch prep):
+Contract (Step 5 batch prep):
   - Routes entries by effective source — explicit `source`, else the
     `cfp_url` host inference shared with backfill-source.py.
   - Only `sessionize-speaker-api` entries are batched; the slug is the

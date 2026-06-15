@@ -306,7 +306,7 @@ def test_user_actioned_wins_and_remains_immutable(dedup_by_url, tmp_path, capsys
 
 def test_sticky_winner_immutable_bot_notes(dedup_by_url, tmp_path, capsys):
     """`shown_in_brief: true` (sticky) entries must be picked as
-    winner ahead of source-host-match per SKILL.md Step 7's sticky
+    winner ahead of source-host-match per SKILL.md Step 8's sticky
     rule, AND their `bot_notes` must NOT be modified by the dedup
     merge — stickiness preserves `status` + `bot_notes` per
     `references/contracts.md`. The loser is still dropped but no

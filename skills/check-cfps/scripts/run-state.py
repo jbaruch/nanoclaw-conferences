@@ -5,7 +5,7 @@ check-cfps is an agent-orchestrated pipeline: deterministic helper scripts
 (fetch, prepare-sessionize-batch, apply-sessionize-results, dedup, ...)
 bracket agent-only steps (MCP calls, web search, relevance judgment). The
 agent historically held every stage's intermediate artifact in context and
-persisted only at Step 7, so a token-limit continuation lost the working
+persisted only at Step 8, so a token-limit continuation lost the working
 set and reconstructed it from a chat summary
 (jbaruch/nanoclaw-conferences#4 — the 2026-06-10 run blew its budget
 mid-pipeline, then re-derived prep output and the state schema from memory).
@@ -35,7 +35,7 @@ Subcommands:
                  {"cleared": true}.
 
 Resume is best-effort, not a correctness requirement: stages are
-idempotent and Step 4 re-verifies the full cohort, so a fresh full run is
+idempotent and Step 5 re-verifies the full cohort, so a fresh full run is
 always safe. `begin` resets across UTC-day boundaries precisely so a
 days-later continuation starts clean rather than resuming a stale run.
 

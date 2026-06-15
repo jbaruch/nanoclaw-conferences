@@ -47,12 +47,12 @@ The check-cfps pipeline checkpoints these stages in order. Each is the JSON arti
 
 | Stage | Produced after | Artifact |
 |-------|----------------|----------|
-| `fetch` | Step 2 fetch script | `check-cfps-fetch.py` stdout (`{cfps, warnings, checked_at}`) |
-| `candidates` | Steps 1–3 merge | the merged, slug-deduped candidate pool (Sessionize + fetch + web-search) |
-| `prep` | Step 4 prepare | `prepare-sessionize-batch.py` stdout (`{slugs, sessionize, non_sessionize, unverifiable, counts}`) |
-| `sessionize_results` | Step 4 MCP call | the `sessionize_get_events` array |
-| `decisions` | Step 4 apply | `apply-sessionize-results.py` stdout (`{decisions, summary}`) |
-| `working_set` | Steps 4–6 | the in-memory entry set (verified + relevance + travel applied) about to be written in Step 7 |
+| `fetch` | Step 3 fetch script | `check-cfps-fetch.py` stdout (`{cfps, warnings, checked_at}`) |
+| `candidates` | Steps 2–4 merge | the merged, slug-deduped candidate pool (Sessionize + fetch + web-search) |
+| `prep` | Step 5 prepare | `prepare-sessionize-batch.py` stdout (`{slugs, sessionize, non_sessionize, unverifiable, counts}`) |
+| `sessionize_results` | Step 5 MCP call | the `sessionize_get_events` array |
+| `decisions` | Step 5 apply | `apply-sessionize-results.py` stdout (`{decisions, summary}`) |
+| `working_set` | Steps 5–7 | the in-memory entry set (verified + relevance + travel applied) about to be written in Step 8 |
 
 Stage names are free-form lowercase identifiers (`[a-z0-9][a-z0-9_-]*`); the table above is the check-cfps contract, not a hard-coded enum in the script.
 
@@ -71,19 +71,15 @@ echo '<artifact json>' | python3 .../run-state.py save prep
 # Reload a saved stage on resume.
 python3 .../run-state.py load prep            # prints the artifact; exit 2 if never saved
 
-# Clear on success (end of Step 7, after the state write + stampers).
+# Clear on success (end of Step 8, after the state write + stampers).
 python3 .../run-state.py done                 # -> {"cleared": true}
 ```
 
 ## Lifecycle
 
-- **Fresh run** — `begin` finds no usable manifest (absent, unreadable, stale `run_date`, or unsupported `schema_version`), clears any leftover files, writes a fresh manifest, returns `resume: false`. The agent runs Steps 1–7, calling `save <stage>` as each artifact appears.
+- **Fresh run** — `begin` finds no usable manifest (absent, unreadable, stale `run_date`, or unsupported `schema_version`), clears any leftover files, writes a fresh manifest, returns `resume: false`. The agent runs Steps 2–8, calling `save <stage>` as each artifact appears.
 - **Resumed run** — a token-limit continuation re-invokes the skill; `begin` finds today's manifest and returns `resume: true` with `completed`. The agent `load`s each completed stage instead of recomputing it and resumes at the first uncompleted stage.
-- **Success** — Step 7 finishes the state write and stampers, then calls `done` to remove the directory. The next run starts clean.
+- **Success** — Step 8 finishes the state write and stampers, then calls `done` to remove the directory. The next run starts clean.
 - **Failure** — on a technical failure the agent stops without `done`; artifacts persist so a same-day retry resumes. A retry on a later UTC day resets to a fresh full run.
 
-Resume is best-effort: stages are idempotent and Step 4 re-verifies the full `open`/`approved` cohort every run, so a fresh full run is always safe and the day-boundary reset is intentional.
-
-## Why filesystem, not a `messages.db` table
-
-Same basis as the nightly-cfp-sync cursor (`../../nightly-cfp-sync/state-schema.md`): a short-lived, single-installation, single-writer scratch artifact with no cross-row queries, torn down on success rather than accumulating rows.
+Resume is best-effort: a fresh full run is always safe (it does not depend on any saved artifact), so a missing or reset store only costs redone work, never correctness.
