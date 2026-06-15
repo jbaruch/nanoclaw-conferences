@@ -13,9 +13,9 @@ Fetches open CFPs from multiple sources via `scripts/check-cfps-fetch.py`, appli
 
 The skill's write invariants (dedup-artifact ban, immutable `user_actioned`, dismissal-reason discipline, `last_verified` surfacing gate, no-silent-defer, budget-low-is-not-a-defer-reason) and the Step 4 verification-failure protocol (`_verify_failed`, `⚠️ STALE DATA` prefix, caller-visible counts) live in `references/contracts.md`. Read once, apply throughout.
 
-## Step 0 — Resume guard
+## Resume guard
 
-This pipeline can be interrupted mid-run by a token-limit continuation. To resume from disk instead of reconstructing the working set from chat history, open (or start) the run's checkpoint store first:
+Before Step 1, run this once. This pipeline can be interrupted mid-run by a token-limit continuation. To resume from disk instead of reconstructing the working set from chat history, open (or start) the run's checkpoint store first:
 
 ```bash
 python3 /home/node/.claude/skills/tessl__check-cfps/scripts/run-state.py begin

@@ -1,10 +1,6 @@
 # Run-state checkpoint store — `cfp-run/`
 
-Referenced from `check-cfps` SKILL.md (Step 0 — Resume guard). Per `coding-policy: stateful-artifacts`, every stateful artifact ships a schema document next to its owner skill; this file is that document for the pipeline's resumable run-state.
-
-## Purpose
-
-check-cfps is an agent-orchestrated pipeline: deterministic helper scripts bracket agent-only steps (the `sessionize_*` MCP calls, web search, relevance judgment), so it cannot collapse into one script and the agent holds intermediate artifacts across steps. This store gives each stage a durable, machine-readable checkpoint on disk, so a run interrupted by a token-limit continuation re-reads the last artifact instead of rebuilding the working set from chat history.
+Referenced from `check-cfps` SKILL.md (Resume guard). Per `coding-policy: stateful-artifacts`, every stateful artifact ships a schema document next to its owner skill; this file is that document for the run-state checkpoint store — the per-stage scratch artifacts check-cfps writes so an interrupted run resumes from disk.
 
 ## Path
 
@@ -86,10 +82,8 @@ python3 .../run-state.py done                 # -> {"cleared": true}
 - **Success** — Step 7 finishes the state write and stampers, then calls `done` to remove the directory. The next run starts clean.
 - **Failure** — on a technical failure the agent stops without `done`; artifacts persist so a same-day retry resumes. A retry on a later UTC day resets to a fresh full run.
 
-## Correctness vs. optimization
-
-Resume is **best-effort**, not load-bearing for correctness. Stages are idempotent and Step 4 re-verifies the full `open`/`approved` cohort every run, so a fresh full run is always safe — the checkpoint store only avoids redoing expensive work after an interruption. That is why the day-boundary reset is deliberate: a days-later continuation should start clean rather than resume a stale working set.
+Resume is best-effort: stages are idempotent and Step 4 re-verifies the full `open`/`approved` cohort every run, so a fresh full run is always safe and the day-boundary reset is intentional.
 
 ## Why filesystem, not a `messages.db` table
 
-Same rationale as the nightly-cfp-sync cursor (`../../nightly-cfp-sync/state-schema.md`): a short-lived, single-installation, single-writer scratch artifact with no cross-row queries. The filesystem variant is greppable from a host shell (`cat`, `ls cfp-run/`) when triaging a run that didn't resume cleanly, and it is torn down on success rather than accumulating rows.
+Same basis as the nightly-cfp-sync cursor (`../../nightly-cfp-sync/state-schema.md`): a short-lived, single-installation, single-writer scratch artifact with no cross-row queries, torn down on success rather than accumulating rows.
