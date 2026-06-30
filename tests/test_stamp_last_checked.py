@@ -40,8 +40,24 @@ def _payload(captured):
     return json.loads(captured.out.strip().splitlines()[-1])
 
 
-def _evidence_file(tmp_path, *, run_date=_TODAY, slugs_expected=1, live_call=True):
-    """Write a verify-evidence.json and return its path."""
+def _evidence_file(
+    tmp_path,
+    *,
+    run_date=_TODAY,
+    slugs_expected=1,
+    live_call=True,
+    resolved=None,
+    verify_failed=None,
+):
+    """Write a verify-evidence.json and return its path.
+
+    By default a clean live marker (one entry resolved). `resolved` overrides
+    the verified-verdict count and `verify_failed` the failure count so a test
+    can express a total outage (live_call true, resolved=0, all verify_failed)."""
+    if resolved is None:
+        resolved = 1 if live_call else 0
+    if verify_failed is None:
+        verify_failed = 0 if live_call else slugs_expected
     path = tmp_path / "verify-evidence.json"
     path.write_text(
         json.dumps(
@@ -49,10 +65,10 @@ def _evidence_file(tmp_path, *, run_date=_TODAY, slugs_expected=1, live_call=Tru
                 "run_date": run_date,
                 "slugs_expected": slugs_expected,
                 "live_call": live_call,
-                "verified": 1 if live_call else 0,
+                "verified": resolved,
                 "dismissed": 0,
                 "dropped": 0,
-                "verify_failed": 0 if live_call else slugs_expected,
+                "verify_failed": verify_failed,
             }
         ),
         encoding="utf-8",
@@ -180,11 +196,11 @@ def test_absent_evidence_refuses_no_advance(stamp_last_checked, monkeypatch, tmp
     assert "not advanced" in captured.err
 
 
-def test_skipped_live_call_refuses(stamp_last_checked, monkeypatch, tmp_path, capsys):
+def test_no_marker_shape_refuses(stamp_last_checked, monkeypatch, tmp_path, capsys):
     _freeze(stamp_last_checked, monkeypatch)
     state_path = tmp_path / "cfp-state.json"
     state_path.write_text(json.dumps({"a-2026": {"status": "open"}}), encoding="utf-8")
-    # slugs were expected but no live call happened (the #7 fake-work shape).
+    # slugs were expected but nothing resolved (the #7 fake-work shape).
     evidence = _evidence_file(tmp_path, slugs_expected=5, live_call=False)
 
     rc = _run(stamp_last_checked, state_path, evidence)
@@ -194,6 +210,24 @@ def test_skipped_live_call_refuses(stamp_last_checked, monkeypatch, tmp_path, ca
     written = _read(state_path)
     assert "_last_checked" not in written
     assert written["_last_checked_skipped"] == _FROZEN_ISO
+
+
+def test_total_outage_all_verify_failed_refuses(stamp_last_checked, monkeypatch, tmp_path, capsys):
+    _freeze(stamp_last_checked, monkeypatch)
+    state_path = tmp_path / "cfp-state.json"
+    state_path.write_text(json.dumps({"a-2026": {"status": "open"}}), encoding="utf-8")
+    # The live call happened (per-slug isolation) but every slug errored, so
+    # nothing was resolved from live data — must not pass the gate.
+    evidence = _evidence_file(
+        tmp_path, slugs_expected=3, live_call=True, resolved=0, verify_failed=3
+    )
+
+    rc = _run(stamp_last_checked, state_path, evidence)
+    captured = capsys.readouterr()
+
+    assert rc == 3
+    assert "no entry resolved" in _payload(captured)["reason"]
+    assert "_last_checked" not in _read(state_path)
 
 
 def test_stale_dated_evidence_refuses(stamp_last_checked, monkeypatch, tmp_path, capsys):

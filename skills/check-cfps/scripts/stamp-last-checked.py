@@ -17,13 +17,15 @@ and the #601 work-evidence watchdog (jbaruch/nanoclaw-conferences#8). So the
 stamp is now *gated on verification evidence*:
 
   * Advance `_last_checked` (clean) only when `verify-sessionize.py` left a
-    `verify-evidence.json` marker for THIS run (`run_date == today`) showing a
-    live call happened (`live_call: true`), OR there was nothing to verify
-    (`slugs_expected == 0`).
-  * Otherwise — marker absent, stale-dated, or recording a skipped/failed live
-    call — do NOT advance the heartbeat. Record a distinct
-    `_last_checked_skipped` timestamp the watchdog can read and exit non-zero
-    (code 3), so a run with no live verification cannot report clean success.
+    `verify-evidence.json` marker for THIS run (`run_date == today`) in which at
+    least one entry was resolved from a live response
+    (`verified + dismissed + dropped >= 1`), OR there was nothing to verify
+    (`slugs_expected == 0`). Entries that only failed verification do not count,
+    so a total Sessionize outage (every slug erroring) can't pass the gate.
+  * Otherwise — marker absent, stale-dated, or recording only verify failures —
+    do NOT advance the heartbeat. Record a distinct `_last_checked_skipped`
+    timestamp the watchdog can read and exit non-zero (code 3), so a run with no
+    live verification cannot report clean success.
 
 A clean stamp clears any prior `_last_checked_skipped`. Only the two top-level
 `_`-prefixed config keys are touched; every CFP record and other config key is
@@ -106,13 +108,22 @@ def _read_evidence(path: Path) -> dict | None:
     return data if isinstance(data, dict) else None
 
 
+def _count(evidence: dict, key: str) -> int:
+    value = evidence.get(key)
+    return value if isinstance(value, int) else 0
+
+
 def verification_state(evidence: dict | None, today: str) -> tuple[bool, str]:
     """Decide whether the heartbeat may advance, plus a reason string.
 
     Returns `(advance, reason)`. `advance` is True only when the marker is from
-    today AND (a live call happened OR there was nothing to verify). The reason
-    doubles as the stdout `verification` value on success ("live" /
-    "none-required") and the refusal explanation otherwise."""
+    today AND (at least one entry was resolved from a live response this run, OR
+    there was nothing to verify). "Resolved" means verified/dismissed/dropped —
+    a real verdict derived from live event data; entries that only failed
+    verification (verify_failed) do not count, so a total Sessionize outage —
+    every slug erroring under the per-slug-isolation contract — cannot pass the
+    gate. The reason doubles as the stdout `verification` value on success
+    ("live" / "none-required") and the refusal explanation otherwise."""
     if evidence is None:
         return False, "no verify-evidence marker for this run"
     if evidence.get("run_date") != today:
@@ -120,9 +131,12 @@ def verification_state(evidence: dict | None, today: str) -> tuple[bool, str]:
         return False, f"verify-evidence is stale (run_date={marker_date!r}, today={today})"
     if evidence.get("slugs_expected") == 0:
         return True, "none-required"
-    if evidence.get("live_call") is True:
+    resolved = (
+        _count(evidence, "verified") + _count(evidence, "dismissed") + _count(evidence, "dropped")
+    )
+    if resolved >= 1:
         return True, "live"
-    return False, "verify-evidence shows no live Sessionize call this run"
+    return False, "verify-evidence shows no entry resolved from a live Sessionize response this run"
 
 
 def main(argv=None):

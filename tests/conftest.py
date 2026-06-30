@@ -177,16 +177,16 @@ def verify_sessionize(tmp_path, monkeypatch):
     lands). Returns (module, run_dir); the dir is NOT created up front.
 
     The driver reuses prepare/apply via sibling importlib load, makes the
-    live events call through the module-global `urllib.request.urlopen`
+    per-slug events call through the module-global `urllib.request.urlopen`
     (tests monkeypatch it, the check-cfps-fetch idiom), reads
-    `SESSIONIZE_API_BASE`/`SESSIONIZE_API_TOKEN` at main() time, and stamps
+    `SESSIONIZE_EVENT_API_KEY`/`SESSIONIZE_API_BASE` at main() time, and stamps
     `run_date` from `module.datetime.now(timezone.utc)` (frozen-subclass
     monkeypatch to cross a day boundary). Tests drive `module.drive(...)`
     directly or `module.main([])` with an `io.StringIO` stdin + capsys."""
     run_dir = tmp_path / "cfp-run"
     monkeypatch.setenv("CFP_RUN_STATE_DIR", str(run_dir))
+    monkeypatch.delenv("SESSIONIZE_EVENT_API_KEY", raising=False)
     monkeypatch.delenv("SESSIONIZE_API_BASE", raising=False)
-    monkeypatch.delenv("SESSIONIZE_API_TOKEN", raising=False)
     module = _load(
         "verify_sessionize_under_test",
         "skills/check-cfps/scripts/verify-sessionize.py",
@@ -202,13 +202,13 @@ def discover_open_cfps(tmp_path, monkeypatch):
 
     Like verify-sessionize, it fetches via the module-global
     `urllib.request.urlopen` (monkeypatched in tests) and reads
-    `SESSIONIZE_API_BASE`/`SESSIONIZE_API_TOKEN` at main() time. Tests call
+    `SESSIONIZE_SPEAKER_KEY`/`SESSIONIZE_API_BASE` at main() time. Tests call
     `module.build_candidates(events, existing_slugs)` directly for the parse,
     or drive `module.main([...])` with `--state` + capsys for the I/O
     contract."""
     state_path = tmp_path / "cfp-state.json"
+    monkeypatch.delenv("SESSIONIZE_SPEAKER_KEY", raising=False)
     monkeypatch.delenv("SESSIONIZE_API_BASE", raising=False)
-    monkeypatch.delenv("SESSIONIZE_API_TOKEN", raising=False)
     module = _load(
         "discover_open_cfps_under_test",
         "skills/check-cfps/scripts/discover-open-cfps.py",

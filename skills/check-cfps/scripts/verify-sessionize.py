@@ -12,42 +12,46 @@ Why a driver, not three prose steps: the round-trip used to be an MCP tool
 Haiku maintenance run skipped the call "to save tokens," fabricated verdicts
 from memory, and still recorded success (jbaruch/nanoclaw-conferences#7). A
 Python subprocess cannot invoke an MCP tool, so the fix is to make the call a
-deterministic HTTP request *inside this script* against the host-provided
-Sessionize API — the payload never enters the agent context, so there is
-nothing in-context to skip.
+deterministic HTTP request *inside this script* — the payload never enters the
+agent context, so there is nothing in-context to skip.
 
-The call is the same normalized contract the MCP tool returned, so this driver
-reuses the existing prepare/apply logic verbatim (sibling importlib load, the
-same mechanism prepare-sessionize-batch.py already uses for backfill-source.py):
+The driver calls the same Sessionize universal API the NanoClaw host tool
+called, with the same per-slug fetch + normalization (a direct port of the
+host's `normalizeSessionizeEvent`, src/ipc.ts), so the array it feeds
+`apply_results` is byte-for-byte the `sessionize_get_events` contract apply
+already consumes:
 
-  prepare(entries)            -> routing + slug derivation (prep object)
-  POST {base}/events {slugs}  -> the per-slug event array (this script)
-  apply_results(prep, array)  -> one deterministic decision per entry
+  prepare(entries)                      -> routing + slug derivation (prep)
+  GET {base}/event?slug=<slug> per slug -> normalized {slug, ...} / {slug,error}
+  apply_results(prep, array)            -> one deterministic decision per entry
 
-Config (host-injected env, see README): `SESSIONIZE_API_BASE` (required when
-there are slugs to verify) and `SESSIONIZE_API_TOKEN` (optional; sent as
-`Authorization: Bearer <token>` when present). The MCP Sessionize tools remain
-available for ad-hoc queries; only this pipeline path moved off them.
+A per-slug failure (HTTP error, timeout, bad JSON) is isolated to a
+`{slug, error}` entry — it never sinks the rest of the cohort — exactly as the
+host's `fetchSessionizeEventsBatch` did; apply turns that entry into
+`verify_failed`. The MCP Sessionize tools remain available for ad-hoc queries;
+only this pipeline path moved off them.
+
+Config (host-injected container env, see README): `SESSIONIZE_EVENT_API_KEY`
+(required when there are slugs to verify; sent as the `X-API-KEY` header, the
+same key the host's `sessionize_get_events` used) and `SESSIONIZE_API_BASE`
+(optional override of the `https://sessionize.com/api/universal` base, for
+tests / future proxying).
 
 Verification evidence: every run writes `verify-evidence.json` into the
 run-state dir (`$CFP_RUN_STATE_DIR`, default
-`/workspace/group/state/cfp-run/`) recording whether a live call actually
-happened this run. `stamp-last-checked.py` reads it and refuses to advance the
-`_last_checked` heartbeat when no live verification occurred — so a run that
-skipped (or could not reach) the API cannot report a clean success
+`/workspace/group/state/cfp-run/`) recording the per-action counts.
+`stamp-last-checked.py` reads it and advances the `_last_checked` heartbeat
+only when at least one entry was resolved from a live response this run (or
+there was nothing to verify) — so a run that skipped the call, or hit a total
+Sessionize outage, cannot report a clean success
 (jbaruch/nanoclaw-conferences#8).
 
 Failure handling — never substitute remembered verdicts:
-  * API unreachable / HTTP error / non-JSON / non-array response for a
-    non-empty slug set: treat as a cohort-wide verification failure — apply
-    sees no results, so every Sessionize entry resolves to `verify_failed`
-    (Step 8 persists the `⚠️ STALE DATA` markers, `last_verified` untouched),
-    and `live_call` is recorded false so the stamp gate keeps the run from
-    reporting clean. Exit 0: the verify_failed decisions ARE the product Step 8
-    must persist.
-  * Per-slug `{slug, error}` inside an otherwise live response: handled by
-    apply as before (that entry -> verify_failed); the call still happened, so
-    `live_call` is true.
+  * A slug whose fetch fails -> `{slug, error}` -> apply marks it
+    `verify_failed` (Step 8 persists the `⚠️ STALE DATA` markers,
+    `last_verified` untouched). A total outage makes every entry verify_failed,
+    which the stamp gate reads as "nothing resolved" and refuses to stamp
+    clean. Exit 0: the verify_failed decisions ARE the product Step 8 persists.
 
 Input (stdin, JSON array) — the cohort to verify, identical to
 prepare-sessionize-batch.py's input:
@@ -55,31 +59,37 @@ prepare-sessionize-batch.py's input:
 
 Output (stdout, JSON):
   {"prep": <prepare() output>,
-   "results": [<event array, [] when the live call failed/was skipped>],
+   "results": [<normalized event array, [] when no slug needed verifying>],
    "decisions": [...], "summary": {...},      # from apply_results()
    "non_sessionize": ["<id>", ...],           # caller marks _verified_this_run
    "evidence": {"run_date", "slugs_expected", "live_call",
                 "verified", "dismissed", "dropped", "verify_failed"}}
 
-Exit 0 on any handled outcome (live success OR cohort-wide verify failure).
+Exit 0 on any handled outcome (live success OR isolated/total verify failure).
 Exit 1 with a stderr diagnostic on unusable input (non-JSON / not an array /
-malformed entry) or missing `SESSIONIZE_API_BASE` when there are slugs to
-verify or a failure writing the evidence marker.
+malformed entry), a missing `SESSIONIZE_EVENT_API_KEY` when there are slugs to
+verify, or a failure writing the evidence marker.
 """
 
 import argparse
+import concurrent.futures
 import importlib.util
 import json
 import os
 import sys
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
 DEFAULT_RUN_DIR = Path("/workspace/group/state/cfp-run")
 EVIDENCE_NAME = "verify-evidence.json"
-HTTP_TIMEOUT = 30
+DEFAULT_API_BASE = "https://sessionize.com/api/universal"
+HTTP_TIMEOUT = 15
+# Bounded concurrency mirrors the host's SESSIONIZE_BATCH_CONCURRENCY so an
+# 80-slug cohort doesn't serialize 80 round-trips nor open one socket per slug.
+FETCH_CONCURRENCY = 10
 
 
 def _load_sibling(name: str, filename: str):
@@ -111,25 +121,87 @@ def _today() -> str:
     return datetime.now(timezone.utc).date().isoformat()
 
 
-def fetch_events(base: str, token: str | None, slugs: list[str]) -> list:
-    """POST the slug list to the host Sessionize API and return the parsed
-    event array. Raises on transport/HTTP/decode failure or a non-array body
-    — the caller maps any raise to a cohort-wide verification failure. Calls
-    the module-global `urllib.request.urlopen` so tests can monkeypatch it
-    (the conftest pattern shared with check-cfps-fetch.py)."""
-    url = base.rstrip("/") + "/events"
-    body = json.dumps({"slugs": slugs}).encode("utf-8")
-    headers = {"Content-Type": "application/json"}
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    request = urllib.request.Request(url, data=body, headers=headers, method="POST")
-    with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT) as resp:
-        payload = json.loads(resp.read().decode("utf-8"))
-    if not isinstance(payload, list):
-        raise ValueError(
-            f"events endpoint returned {type(payload).__name__}, expected a JSON array"
-        )
-    return payload
+def _obj(value: object) -> dict:
+    """A nested Sessionize group as a dict, defaulting a missing/non-object
+    group to `{}` — the totality the host normalizer relies on so a partial
+    payload never raises."""
+    return value if isinstance(value, dict) else {}
+
+
+def _cfp_open(end_utc: object) -> bool:
+    """Port of the host's `!!cfpDates.endUtc && new Date(endUtc) > new Date()`:
+    the CFP is open when its end instant is parseable and still in the future.
+    An unparseable/absent end is closed, matching `new Date(invalid) > now`
+    being false."""
+    if not isinstance(end_utc, str) or not end_utc:
+        return False
+    try:
+        parsed = datetime.fromisoformat(end_utc.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed > datetime.now(timezone.utc)
+
+
+def normalize_event(event: dict, slug: str) -> dict:
+    """Map a raw Sessionize universal-event payload to the flat shape
+    `apply_results` consumes. Direct port of the host's
+    `normalizeSessionizeEvent` (src/ipc.ts) so the contract stays identical now
+    that the tile calls the API itself instead of via the MCP tool."""
+    cfp_dates = _obj(event.get("cfpDates"))
+    event_dates = _obj(event.get("eventDates"))
+    location = _obj(event.get("location"))
+    timezone_ = _obj(event.get("timezone"))
+    return {
+        "name": event.get("name"),
+        "cfp_open": _cfp_open(cfp_dates.get("endUtc")),
+        "cfp_start": cfp_dates.get("startUtc"),
+        "cfp_end": cfp_dates.get("endUtc"),
+        "cfp_start_local": cfp_dates.get("start"),
+        "cfp_end_local": cfp_dates.get("end"),
+        "conf_start": event_dates.get("start"),
+        "conf_end": event_dates.get("end"),
+        "location": location.get("full"),
+        "city": location.get("city"),
+        "country": location.get("country"),
+        "timezone": timezone_.get("iana"),
+        "is_online": event.get("isOnline"),
+        "website": event.get("website"),
+        "cfp_url": event.get("cfpLink") or f"https://sessionize.com/{slug}/",
+        "expenses_covered": _obj(event.get("expensesCovered")),
+        "organizer": event.get("organizer"),
+    }
+
+
+def fetch_one(base: str, api_key: str, slug: str) -> dict:
+    """Fetch and normalize one Sessionize event. Any transport/HTTP/decode
+    failure (or a non-object body) is isolated to `{slug, error}` so a single
+    bad slug never sinks the cohort — the host's batch contract. Calls the
+    module-global `urllib.request.urlopen` so tests can monkeypatch it."""
+    url = f"{base.rstrip('/')}/event?slug={urllib.parse.quote(slug)}"
+    request = urllib.request.Request(url, headers={"X-API-KEY": api_key}, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT) as resp:
+            event = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as exc:
+        return {"slug": slug, "error": f"{type(exc).__name__}: {exc}"}
+    if not isinstance(event, dict):
+        return {
+            "slug": slug,
+            "error": f"event response was {type(event).__name__}, expected object",
+        }
+    return {"slug": slug, **normalize_event(event, slug)}
+
+
+def fetch_events(base: str, api_key: str, slugs: list[str]) -> list:
+    """Fetch every slug with bounded concurrency, preserving input order.
+    Never raises — per-slug failures are `{slug, error}` entries."""
+    if not slugs:
+        return []
+    workers = min(FETCH_CONCURRENCY, len(slugs))
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+        return list(pool.map(lambda slug: fetch_one(base, api_key, slug), slugs))
 
 
 def _write_evidence(run_dir: Path, evidence: dict) -> None:
@@ -141,41 +213,19 @@ def _write_evidence(run_dir: Path, evidence: dict) -> None:
     (run_dir / EVIDENCE_NAME).write_text(json.dumps(evidence, indent=2) + "\n", encoding="utf-8")
 
 
-def run_verification(prep: dict, base: str | None, token: str | None) -> tuple[list, bool]:
-    """Perform the live events round-trip for `prep`'s slug set.
-
-    Returns `(results, live_call)`. An empty slug set needs no call (returns
-    `([], False)`). A failed call for a non-empty slug set is a handled,
-    cohort-wide verification failure: returns `([], False)` after writing a
-    stderr diagnostic, so apply resolves every Sessionize entry to
-    `verify_failed` rather than this script fabricating verdicts."""
+def drive(prep: dict, base: str, api_key: str, run_dir: Path) -> dict:
+    """Fetch -> apply, writing the evidence marker. `prep` is `prepare()`'s
+    output, built once by the caller; `api_key` is required only when prep has
+    slugs (main() enforces that before calling)."""
     slugs = prep["slugs"]
-    if not slugs:
-        return [], False
-    # `base` is guaranteed non-None here: main() rejects an empty slug set with
-    # an unset SESSIONIZE_API_BASE before calling this.
-    assert base is not None
-    try:
-        return fetch_events(base, token, slugs), True
-    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as exc:
-        sys.stderr.write(
-            f"verify-sessionize: live events call failed: {type(exc).__name__}: {exc}\n"
-        )
-        return [], False
-
-
-def drive(prep: dict, base: str | None, token: str | None, run_dir: Path) -> dict:
-    """live events call -> apply, writing the evidence marker. The single
-    apply/evidence path: a failed call simply yields no results, which apply
-    turns into cohort-wide verify_failed. `prep` is `prepare()`'s output,
-    built once by the caller."""
-    results, live_call = run_verification(prep, base, token)
+    results = fetch_events(base, api_key, slugs) if slugs else []
+    live_call = bool(slugs)
 
     applied = apply_results(prep, results)
     summary = applied["summary"]
     evidence = {
         "run_date": _today(),
-        "slugs_expected": len(prep["slugs"]),
+        "slugs_expected": len(slugs),
         "live_call": live_call,
         "verified": summary["verified"],
         "dismissed": summary["dismissed"],
@@ -232,21 +282,23 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write(f"verify-sessionize: {diagnostic}\n")
         return 1
 
-    # Slug count gates the SESSIONIZE_API_BASE requirement: a cohort with no
-    # Sessionize slugs (all non_sessionize / unverifiable) verifies without a
-    # network call, so it must not hard-fail on missing config.
+    # Slug count gates the API-key requirement: a cohort with no Sessionize
+    # slugs (all non_sessionize / unverifiable) verifies without a network call,
+    # so it must not hard-fail on missing config.
     prep = prepare(entries)
-    base = os.environ.get("SESSIONIZE_API_BASE")
-    token = os.environ.get("SESSIONIZE_API_TOKEN")
-    if prep["slugs"] and not base:
+    base = os.environ.get("SESSIONIZE_API_BASE") or DEFAULT_API_BASE
+    api_key = os.environ.get("SESSIONIZE_EVENT_API_KEY")
+    if prep["slugs"] and not api_key:
         sys.stderr.write(
-            f"verify-sessionize: SESSIONIZE_API_BASE is unset but {len(prep['slugs'])} "
+            f"verify-sessionize: SESSIONIZE_EVENT_API_KEY is unset but {len(prep['slugs'])} "
             "slug(s) need live verification\n"
         )
         return 1
 
     try:
-        output = drive(prep, base, token, run_dir)
+        # api_key is non-None here when slugs exist (guarded above); when there
+        # are no slugs, drive() makes no call and never reads it.
+        output = drive(prep, base, api_key or "", run_dir)
     except OSError as exc:
         sys.stderr.write(
             f"verify-sessionize: could not write evidence marker: {type(exc).__name__}: {exc}\n"
