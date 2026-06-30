@@ -184,7 +184,16 @@ def fetch_one(base: str, api_key: str, slug: str) -> dict:
     try:
         with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT) as resp:
             event = json.loads(resp.read().decode("utf-8"))
-    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as exc:
+    except (
+        urllib.error.URLError,
+        OSError,
+        UnicodeDecodeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as exc:
+        # UnicodeDecodeError (a ValueError subclass) is named explicitly so a
+        # non-UTF-8 body is visibly isolated to this slug, not just incidentally
+        # caught — matches the repo's decode-failure idiom.
         return {"slug": slug, "error": f"{type(exc).__name__}: {exc}"}
     if not isinstance(event, dict):
         return {

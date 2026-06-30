@@ -185,7 +185,15 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         events = fetch_open_cfps(base, api_key)
-    except (urllib.error.URLError, OSError, ValueError, json.JSONDecodeError) as exc:
+    except (
+        urllib.error.URLError,
+        OSError,
+        UnicodeDecodeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as exc:
+        # UnicodeDecodeError (a ValueError subclass) named explicitly: a
+        # non-UTF-8 body exits 1 with this diagnostic, never a stack trace.
         sys.stderr.write(
             f"discover-open-cfps: open-cfps fetch failed: {type(exc).__name__}: {exc}\n"
         )
