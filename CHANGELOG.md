@@ -2,6 +2,17 @@
 
 All notable changes to this tile are documented here.
 
+## 0.1.6
+
+### Added
+
+- Pyright is now gated in CI at zero findings (`jbaruch/nanoclaw-conferences#6`, adopting `jbaruch/coding-policy: language-diagnostics`): new `pyrightconfig.json` (basic, py3.11, over `skills` + `tests`), a pinned `pyright==1.1.390`, and a `python -m pyright` step between ruff and pytest. Turning the gate on for a never-checked tree is landed as its own focused change, separate from feature work, per the rule.
+- `.github/dependabot.yml` gives the pinned dev dependencies (`pytest`, `ruff`, `pyright`) and the GitHub Actions a stated, automated renewal mechanism, per `jbaruch/coding-policy: dependency-management`.
+
+### Fixed
+
+- The first pyright run surfaced 13 real findings, all fixed with typed None-guards (no blanket suppressions): unchecked `importlib` `spec_from_file_location` (`ModuleSpec | None`) access in the `prepare-sessionize-batch.py` sibling loader, the `conftest.py` loader, and three test-module loaders; and `__doc__`-is-`None` (under `-OO`) before `.splitlines()[0]` in `stamp-cursor.py`.
+
 ## 0.1.5
 
 ### Added

@@ -56,6 +56,8 @@ def _load_infer_source():
     here would silently mis-route entries the backfill already handles)."""
     sibling = Path(__file__).with_name("backfill-source.py")
     spec = importlib.util.spec_from_file_location("_cfps_backfill_source", sibling)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"cannot load {sibling}")
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.infer_source

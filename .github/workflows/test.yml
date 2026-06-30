@@ -31,5 +31,11 @@ jobs:
           python -m ruff check tests/ skills/
           python -m ruff format --check tests/ skills/
 
+      # Language diagnostics gate per `jbaruch/coding-policy:
+      # language-diagnostics` — pyright must report zero findings. Runs after
+      # ruff and before pytest so a type error fails fast.
+      - name: Type check (pyright)
+        run: python -m pyright
+
       - name: Pytest
         run: python -m pytest
