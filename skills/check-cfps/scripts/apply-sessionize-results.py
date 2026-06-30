@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Apply check-cfps Step 5 Sessionize batch results to the entries.
 
-Consumes the `prepare-sessionize-batch.py` join table plus the array
-returned by the `sessionize_get_events` MCP call and emits one
-deterministic decision per Sessionize entry. The decision logic mirrors
-the Step 5 contract:
+Consumes the `prepare-sessionize-batch.py` join table plus the normalized
+event array from the verify driver's Sessionize fetch (`verify-sessionize.py`,
+which imports this module) and emits one deterministic decision per Sessionize
+entry. The decision logic mirrors the Step 5 contract:
 
   * result missing for a slug, or `{slug, error}`  -> verify_failed
     (caller applies the verification-failure protocol in
@@ -35,7 +35,7 @@ cfp-state.json. Step 8 remains the sole writer.
 
 Input (stdin, JSON object):
   {"prep": <output of prepare-sessionize-batch.py>,
-   "results": [<sessionize_get_events array>]}
+   "results": [<normalized Sessionize event array>]}
 
 Output (stdout, JSON):
   {"decisions": [{"id": ..., "cohort": "new"|"stored",
@@ -178,7 +178,7 @@ def main(argv: list[str]) -> int:
         return 1
     if not isinstance(results, list):
         sys.stderr.write(
-            "apply-sessionize-results: `results` must be the " "sessionize_get_events array\n"
+            "apply-sessionize-results: `results` must be the normalized Sessionize event array\n"
         )
         return 1
     for key in ("sessionize", "unverifiable"):

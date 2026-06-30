@@ -4,8 +4,9 @@
 Given the entries Step 5 must verify (new candidates from Steps 2-4 plus
 stored `open`/`approved` rows), this script decides — deterministically —
 which ones are Sessionize-sourced, derives each one's Sessionize slug, and
-emits the unique slug list to hand to the `sessionize_get_events` MCP call
-together with a join table for `apply-sessionize-results.py`.
+emits the unique slug list for the verify driver's Sessionize events fetch
+(`verify-sessionize.py`, which imports this module) together with a join
+table for `apply-sessionize-results.py`.
 
 Routing matches `references/source-routing.md`: an entry's *effective
 source* is its explicit `source`, or — when `source` is absent — the host

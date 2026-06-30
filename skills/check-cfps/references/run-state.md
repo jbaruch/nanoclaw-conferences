@@ -11,10 +11,9 @@ cfp-run/
   manifest.json        run bookkeeping
   fetch.json           saved stage artifacts (one file per saved stage)
   candidates.json
-  prep.json
-  sessionize_results.json
-  decisions.json
+  verify.json
   working_set.json
+  verify-evidence.json the Step 5 driver's verification marker (read by the Step 8 stamp gate)
 ```
 
 ## Owner
@@ -31,7 +30,7 @@ cfp-run/
 {
   "schema_version": 1,
   "run_date": "2026-06-13",
-  "completed": ["fetch", "candidates", "prep"]
+  "completed": ["fetch", "candidates", "verify"]
 }
 ```
 
@@ -49,9 +48,7 @@ The check-cfps pipeline checkpoints these stages in order. Each is the JSON arti
 |-------|----------------|----------|
 | `fetch` | Step 3 fetch script | `check-cfps-fetch.py` stdout (`{cfps, warnings, checked_at}`) |
 | `candidates` | Steps 2–4 merge | the merged, slug-deduped candidate pool (Sessionize + fetch + web-search) |
-| `prep` | Step 5 prepare | `prepare-sessionize-batch.py` stdout (`{slugs, sessionize, non_sessionize, unverifiable, counts}`) |
-| `sessionize_results` | Step 5 MCP call | the `sessionize_get_events` array |
-| `decisions` | Step 5 apply | `apply-sessionize-results.py` stdout (`{decisions, summary}`) |
+| `verify` | Step 5 driver | `verify-sessionize.py` stdout (`{prep, results, decisions, summary, non_sessionize, evidence}`) |
 | `working_set` | Steps 5–7 | the in-memory entry set (verified + relevance + travel applied) about to be written in Step 8 |
 
 Stage names are free-form lowercase identifiers (`[a-z0-9][a-z0-9_-]*`); the table above is the check-cfps contract, not a hard-coded enum in the script.
@@ -62,14 +59,14 @@ Stage names are free-form lowercase identifiers (`[a-z0-9][a-z0-9_-]*`); the tab
 # Start or resume. Resets across a UTC-day boundary; resumes within the same day.
 python3 .../run-state.py begin
 # -> {"resume": false, "run_date": "2026-06-13", "completed": []}
-# -> {"resume": true,  "run_date": "2026-06-13", "completed": ["fetch", "prep"]}
+# -> {"resume": true,  "run_date": "2026-06-13", "completed": ["fetch", "verify"]}
 
 # Persist a stage artifact (JSON on stdin).
-echo '<artifact json>' | python3 .../run-state.py save prep
-# -> {"saved": "prep"}
+echo '<artifact json>' | python3 .../run-state.py save verify
+# -> {"saved": "verify"}
 
 # Reload a saved stage on resume.
-python3 .../run-state.py load prep            # prints the artifact; exit 2 if never saved
+python3 .../run-state.py load verify          # prints the artifact; exit 2 if never saved
 
 # Clear on success (end of Step 8, after the state write + stampers).
 python3 .../run-state.py done                 # -> {"cleared": true}
