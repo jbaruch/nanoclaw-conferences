@@ -45,6 +45,7 @@ def _evidence_file(
     *,
     run_date=_TODAY,
     slugs_expected=1,
+    sessionize_total=None,
     live_call=True,
     resolved=None,
     verify_failed=None,
@@ -53,17 +54,23 @@ def _evidence_file(
 
     By default a clean live marker (one entry resolved). `resolved` overrides
     the verified-verdict count and `verify_failed` the failure count so a test
-    can express a total outage (live_call true, resolved=0, all verify_failed)."""
+    can express a total outage (live_call true, resolved=0, all verify_failed).
+    `sessionize_total` (the full Sessionize cohort the gate keys on) defaults to
+    `slugs_expected` but can be set higher to model unverifiable entries that
+    carry no fetchable slug."""
     if resolved is None:
         resolved = 1 if live_call else 0
     if verify_failed is None:
         verify_failed = 0 if live_call else slugs_expected
+    if sessionize_total is None:
+        sessionize_total = slugs_expected
     path = tmp_path / "verify-evidence.json"
     path.write_text(
         json.dumps(
             {
                 "run_date": run_date,
                 "slugs_expected": slugs_expected,
+                "sessionize_total": sessionize_total,
                 "live_call": live_call,
                 "verified": resolved,
                 "dismissed": 0,
@@ -228,6 +235,27 @@ def test_total_outage_all_verify_failed_refuses(stamp_last_checked, monkeypatch,
     assert rc == 3
     assert "no entry resolved" in _payload(captured)["reason"]
     assert "_last_checked" not in _read(state_path)
+
+
+def test_unverifiable_only_cohort_refuses(stamp_last_checked, monkeypatch, tmp_path, capsys):
+    _freeze(stamp_last_checked, monkeypatch)
+    state_path = tmp_path / "cfp-state.json"
+    state_path.write_text(json.dumps({"a-2026": {"status": "open"}}), encoding="utf-8")
+    # The whole Sessionize cohort had no derivable slug -> all unverifiable ->
+    # verify_failed, so slugs_expected==0 but sessionize_total>0. The gate must
+    # NOT read this as "none-required" (jbaruch/nanoclaw-conferences#8).
+    evidence = _evidence_file(
+        tmp_path, slugs_expected=0, sessionize_total=2, live_call=False, resolved=0, verify_failed=2
+    )
+
+    rc = _run(stamp_last_checked, state_path, evidence)
+    captured = capsys.readouterr()
+
+    assert rc == 3
+    assert "no entry resolved" in _payload(captured)["reason"]
+    written = _read(state_path)
+    assert "_last_checked" not in written
+    assert written["_last_checked_skipped"] == _FROZEN_ISO
 
 
 def test_stale_dated_evidence_refuses(stamp_last_checked, monkeypatch, tmp_path, capsys):

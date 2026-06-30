@@ -62,7 +62,7 @@ Output (stdout, JSON):
    "results": [<normalized event array, [] when no slug needed verifying>],
    "decisions": [...], "summary": {...},      # from apply_results()
    "non_sessionize": ["<id>", ...],           # caller marks _verified_this_run
-   "evidence": {"run_date", "slugs_expected", "live_call",
+   "evidence": {"run_date", "slugs_expected", "sessionize_total", "live_call",
                 "verified", "dismissed", "dropped", "verify_failed"}}
 
 Exit 0 on any handled outcome (live success OR isolated/total verify failure).
@@ -100,7 +100,11 @@ def _load_sibling(name: str, filename: str):
     sibling = Path(__file__).with_name(filename)
     spec = importlib.util.spec_from_file_location(name, sibling)
     if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load sibling module from {sibling}")
+        raise ImportError(
+            f"cannot load {filename} from {sibling}: the check-cfps script bundle "
+            "looks incomplete — restore the sibling script next to verify-sessionize.py "
+            "(or reinstall the tile) and retry"
+        )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
@@ -232,9 +236,18 @@ def drive(prep: dict, base: str, api_key: str, run_dir: Path) -> dict:
 
     applied = apply_results(prep, results)
     summary = applied["summary"]
+    # `sessionize_total` is the full Sessionize cohort that needed verification
+    # this run — entries WITH a fetchable slug (`prep["sessionize"]`) PLUS
+    # Sessionize-sourced entries with no derivable slug (`prep["unverifiable"]`,
+    # which apply resolves to verify_failed). The stamp gate keys on this, not
+    # on `slugs_expected` (unique fetchable slugs): an unverifiable-only cohort
+    # has slugs_expected==0 yet must NOT count as "nothing to verify", or a run
+    # that resolved nothing would advance the heartbeat (jbaruch/nanoclaw-conferences#8,
+    # stateful-artifacts).
     evidence = {
         "run_date": _today(),
         "slugs_expected": len(slugs),
+        "sessionize_total": len(prep["sessionize"]) + len(prep["unverifiable"]),
         "live_call": live_call,
         "verified": summary["verified"],
         "dismissed": summary["dismissed"],

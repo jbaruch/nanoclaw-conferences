@@ -197,8 +197,37 @@ def test_empty_slug_set_makes_no_call(verify_sessionize, monkeypatch):
     out = _drive(module, [entry], "", run_dir)
 
     assert out["evidence"]["slugs_expected"] == 0
+    assert out["evidence"]["sessionize_total"] == 0
     assert out["evidence"]["live_call"] is False
     assert out["non_sessionize"] == ["d1"]
+
+
+def test_unverifiable_sessionize_entry_counts_in_cohort(verify_sessionize, monkeypatch):
+    # A Sessionize-sourced entry whose cfp_url has no scheme/netloc yields no
+    # derivable slug -> prep.unverifiable -> verify_failed, with slugs_expected
+    # == 0. sessionize_total must still count it so the stamp gate does NOT read
+    # the run as "nothing to verify" (jbaruch/nanoclaw-conferences#8, stateful-artifacts).
+    module, run_dir = verify_sessionize
+
+    def _boom(request, timeout=None):
+        raise AssertionError("no events call: an unverifiable entry has no slug to fetch")
+
+    monkeypatch.setattr("urllib.request.urlopen", _boom)
+
+    entry = {
+        "id": "u1",
+        "cohort": "stored",
+        "source": "sessionize-speaker-api",
+        "cfp_url": "not-a-url",
+    }
+    out = _drive(module, [entry], "event-key", run_dir)
+
+    assert out["decisions"][0]["action"] == "verify_failed"
+    ev = out["evidence"]
+    assert ev["slugs_expected"] == 0
+    assert ev["sessionize_total"] == 1
+    assert ev["verify_failed"] == 1
+    assert _evidence(run_dir)["sessionize_total"] == 1
 
 
 # --- main() I/O + config ---------------------------------------------------

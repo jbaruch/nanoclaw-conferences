@@ -19,9 +19,10 @@ stamp is now *gated on verification evidence*:
   * Advance `_last_checked` (clean) only when `verify-sessionize.py` left a
     `verify-evidence.json` marker for THIS run (`run_date == today`) in which at
     least one entry was resolved from a live response
-    (`verified + dismissed + dropped >= 1`), OR there was nothing to verify
-    (`slugs_expected == 0`). Entries that only failed verification do not count,
-    so a total Sessionize outage (every slug erroring) can't pass the gate.
+    (`verified + dismissed + dropped >= 1`), OR there were no Sessionize entries
+    to verify (`sessionize_total == 0`). Entries that only failed verification
+    do not count, so a total Sessionize outage (every slug erroring) — or a
+    cohort that is entirely unverifiable — can't pass the gate.
   * Otherwise — marker absent, stale-dated, or recording only verify failures —
     do NOT advance the heartbeat. Record a distinct `_last_checked_skipped`
     timestamp the watchdog can read and exit non-zero (code 3), so a run with no
@@ -118,18 +119,28 @@ def verification_state(evidence: dict | None, today: str) -> tuple[bool, str]:
 
     Returns `(advance, reason)`. `advance` is True only when the marker is from
     today AND (at least one entry was resolved from a live response this run, OR
-    there was nothing to verify). "Resolved" means verified/dismissed/dropped —
-    a real verdict derived from live event data; entries that only failed
-    verification (verify_failed) do not count, so a total Sessionize outage —
-    every slug erroring under the per-slug-isolation contract — cannot pass the
-    gate. The reason doubles as the stdout `verification` value on success
-    ("live" / "none-required") and the refusal explanation otherwise."""
+    there were no Sessionize entries to verify at all). "Resolved" means
+    verified/dismissed/dropped — a real verdict derived from live event data;
+    entries that only failed verification (verify_failed) do not count, so a
+    total Sessionize outage cannot pass the gate.
+
+    The "nothing to verify" branch keys on `sessionize_total` (the full
+    Sessionize cohort: fetchable slugs PLUS unverifiable Sessionize entries),
+    NOT `slugs_expected` (unique fetchable slugs). A cohort that is entirely
+    unverifiable (Sessionize-sourced but no derivable slug -> all verify_failed)
+    has slugs_expected==0 yet sessionize_total>0, so it correctly fails the gate
+    instead of being waved through as "none-required"
+    (jbaruch/nanoclaw-conferences#8, stateful-artifacts). Older markers without
+    `sessionize_total` fall back to `slugs_expected` for the count. The reason
+    doubles as the stdout `verification` value on success ("live" /
+    "none-required") and the refusal explanation otherwise."""
     if evidence is None:
         return False, "no verify-evidence marker for this run"
     if evidence.get("run_date") != today:
         marker_date = evidence.get("run_date")
         return False, f"verify-evidence is stale (run_date={marker_date!r}, today={today})"
-    if evidence.get("slugs_expected") == 0:
+    cohort = evidence.get("sessionize_total", evidence.get("slugs_expected"))
+    if cohort == 0:
         return True, "none-required"
     resolved = (
         _count(evidence, "verified") + _count(evidence, "dismissed") + _count(evidence, "dropped")
