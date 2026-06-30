@@ -38,7 +38,7 @@ Resume is best-effort — stages are idempotent and Step 5 re-verifies the full 
 python3 /home/node/.claude/skills/tessl__check-cfps/scripts/discover-open-cfps.py
 ```
 
-The script calls the Sessionize open-CFPs API itself (host-injected `SESSIONIZE_SPEAKER_KEY`), applies the online/user-group filter, derives the Step 2 candidate shape (`name`, `city`, `conf_date`, `deadline` from `cfpDates.endUtc[:10]`, `cfp_url`, `slug` from `cfpLink`, `source: "sessionize-speaker-api"`), and skips slugs already in `/workspace/group/cfp-state.json` (any status). Do NOT parse the API response inline — the deterministic parse is the whole point (jbaruch/nanoclaw-conferences#9); the `mcp__nanoclaw__sessionize_open_cfps` tool stays available for ad-hoc queries only. Parse stdout `{candidates, counts}`; carry `candidates` into the pool. Abort if the script exits non-zero (an outage must not read as "0 new CFPs"). Do not write to state here.
+Discovers new Sessionize open-CFP candidates deterministically (needs the host-injected `SESSIONIZE_SPEAKER_KEY`; reads `/workspace/group/cfp-state.json` to skip already-tracked slugs). Do NOT call the Sessionize API or parse its response inline — that is the script's job (jbaruch/nanoclaw-conferences#9); the `mcp__nanoclaw__sessionize_open_cfps` tool stays available for ad-hoc queries only. Parse stdout `{candidates, counts}` and carry `candidates` into the pool. Abort if the script exits non-zero (an outage must not read as "0 new CFPs"). Do not write to state here. The candidate shape and filter rules are the script's contract (`scripts/discover-open-cfps.py` docstring).
 
 ## Step 3 — Run fetch-and-filter script
 
@@ -74,7 +74,7 @@ Pass the entries to verify on stdin as a JSON array — one object per new candi
 python3 /home/node/.claude/skills/tessl__check-cfps/scripts/verify-sessionize.py
 ```
 
-It routes by effective source, derives each Sessionize slug, fetches every slug from the Sessionize universal API (per-slug failures isolate to `verify_failed`, never sinking the cohort), applies the verdict logic, and writes the `verify-evidence.json` marker Step 8's stamp reads. It emits `{prep, results, decisions, summary, non_sessionize, evidence}`. **Checkpoint:** `save verify` (this output). Send `non_sessionize` ids to the branch below. The `mcp__nanoclaw__sessionize_get_events` tool stays available for ad-hoc queries only. Apply each decision to the working set:
+It verifies the Sessionize cohort against the live API (host-injected `SESSIONIZE_EVENT_API_KEY`) and writes the `verify-evidence.json` marker Step 8's stamp reads, emitting `{prep, results, decisions, summary, non_sessionize, evidence}` — the routing, verdict rules, and per-slug failure contract are the script's (`scripts/verify-sessionize.py` docstring). **Checkpoint:** `save verify` (this output). Send `non_sessionize` ids to the branch below. The `mcp__nanoclaw__sessionize_get_events` tool stays available for ad-hoc queries only. Apply each decision to the working set:
 - `verified` → set `deadline` to the decision's value, mark `_verified_this_run: true`, clear the stale markers per `references/contracts.md` (`stale: false`, strip the canonical `⚠️ STALE DATA` prefix, drop `_verify_skipped`), and attach the decision's `event` fields (e.g. `expenses_covered`) in memory for Steps 6/8.
 - `dismiss` → `status: "dismissed"`, `bot_notes` = the decision's `bot_notes`.
 - `drop` → drop the new candidate.
