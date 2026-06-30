@@ -57,7 +57,11 @@ def _load_infer_source():
     sibling = Path(__file__).with_name("backfill-source.py")
     spec = importlib.util.spec_from_file_location("_cfps_backfill_source", sibling)
     if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load {sibling}")
+        raise ImportError(
+            f"cannot load backfill-source.py from {sibling}: the check-cfps script "
+            "bundle looks incomplete — restore the sibling script next to "
+            "prepare-sessionize-batch.py (or reinstall the tile) and retry"
+        )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.infer_source

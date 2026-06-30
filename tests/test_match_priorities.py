@@ -55,7 +55,10 @@ PRIORITIES = {
 def _load(name: str):
     spec = importlib.util.spec_from_file_location(name, REPO_ROOT / SCRIPT_REL)
     if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load {name} from {SCRIPT_REL}")
+        raise ImportError(
+            f"cannot load {name} from {SCRIPT_REL}: confirm SCRIPT_REL still points at "
+            "the checked-in script (update it if the script was renamed) and rerun pytest"
+        )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
