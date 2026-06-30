@@ -66,7 +66,7 @@ Verify two cohorts:
 
 ### Sessionize-sourced
 
-One deterministic driver does prepare → live per-slug verification → apply in a single invocation — the agent does not make the API call, derive slugs, join results, or pick verdicts in prose. This is the whole point: the live round-trip used to be an `mcp__nanoclaw__sessionize_get_events` call whose ~267 KB response landed in your context, and under token pressure that call got skipped with verdicts faked from memory (jbaruch/nanoclaw-conferences#7). The driver calls the Sessionize API itself (host-injected `SESSIONIZE_EVENT_API_KEY`), so there is no in-context response to skip.
+One deterministic driver does prepare → live per-slug verification → apply in a single invocation, calling the Sessionize API itself (host-injected `SESSIONIZE_EVENT_API_KEY`). Make the Sessionize round-trip ONLY through this script — never inline — so its large response stays out of context; do not derive slugs, join results, or pick verdicts in prose.
 
 Pass the entries to verify on stdin as a JSON array — one object per new candidate (Steps 2–4) and per stored `open`/`approved` row — each `{id, cohort: "new"|"stored", cfp_url, source?, slug?}`:
 

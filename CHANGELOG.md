@@ -2,7 +2,7 @@
 
 All notable changes to this tile are documented here.
 
-## 0.1.7
+## 0.1.7 — 2026-06-30
 
 ### Changed
 
