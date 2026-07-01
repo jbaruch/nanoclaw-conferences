@@ -31,7 +31,14 @@ Load the overlay at the **main or trusted** tier — the skill reads `/workspace
 
 ## Required environment
 
-None. Conference data comes from the NanoClaw host-provided MCP tools (`sessionize_open_cfps`, `sessionize_get_events`, `fetch_markdown`) and public JSON feeds (`developers.events`, `javaconferences.org`). The tile consumes no secrets of its own.
+The CFP pipeline calls the Sessionize universal API deterministically from its own scripts (so the large responses never enter the agent's context — see jbaruch/nanoclaw-conferences#7/#9), which needs two host-injected keys in the container environment:
+
+| Variable | Used by | Sent as |
+|----------|---------|---------|
+| `SESSIONIZE_SPEAKER_KEY` | `discover-open-cfps.py` (Step 2) | `X-API-KEY` header to `.../open-cfps` |
+| `SESSIONIZE_EVENT_API_KEY` | `verify-sessionize.py` (Step 5) | `X-API-KEY` header to `.../event?slug=` |
+
+`SESSIONIZE_API_BASE` optionally overrides the `https://sessionize.com/api/universal` base (tests / proxying). These are the same keys the NanoClaw host already holds for its `sessionize_*` tools; the tile reads them from the injected environment and bundles no secret of its own. Remaining data comes from the host `fetch_markdown` tool and public JSON feeds (`developers.events`, `javaconferences.org`); the `sessionize_*` MCP tools remain available for ad-hoc queries.
 
 ## Runtime data
 

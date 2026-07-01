@@ -40,8 +40,8 @@ always safe. `begin` resets across UTC-day boundaries precisely so a
 days-later continuation starts clean rather than resuming a stale run.
 
 Stage names are free-form lowercase identifiers (`[a-z0-9][a-z0-9_-]*`);
-check-cfps uses fetch, candidates, prep, sessionize_results, decisions,
-working_set. Schema doc: `references/run-state.md`.
+check-cfps uses fetch, candidates, verify, working_set. Schema doc:
+`references/run-state.md`.
 
 Exit 0 on success; exit 1 with a stderr diagnostic on bad usage /
 malformed input / I/O failure; exit 2 when `load` is asked for an absent

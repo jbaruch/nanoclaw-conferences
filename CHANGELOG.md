@@ -2,6 +2,20 @@
 
 All notable changes to this tile are documented here.
 
+## 0.1.7 — 2026-06-30
+
+### Changed
+
+- The `check-cfps` Sessionize round-trips moved out of the agent's context into deterministic scripts that call the Sessionize universal API directly, closing the "skip to save tokens" hole behind issues `jbaruch/nanoclaw-conferences#4`/#7/#8/#9. The MCP `sessionize_*` tools stay available for ad-hoc queries; only the pipeline path changed. Because a Python subprocess can't invoke an MCP tool, the ~260 KB open-CFP and ~267 KB events payloads used to land in the agent's own context, where a token-pressured Haiku run would improvise inline Python — misparsing the open-CFP list as "1 event" (0 new candidates on 2026-06-29) and skipping the live verify call while faking verdicts from memory yet recording success.
+  - **Verification driver (#7):** new `scripts/verify-sessionize.py` collapses Step 5's prepare → events round-trip → apply into one invocation. It fetches each slug from `https://sessionize.com/api/universal/event?slug=` (`X-API-KEY: SESSIONIZE_EVENT_API_KEY`), normalizing each raw event in-tile via a direct port of the host's `normalizeSessionizeEvent`. Per-slug failures isolate to `verify_failed` (bounded concurrency, the host's batch contract) and never substitute remembered verdicts.
+  - **Discovery (#9):** new `scripts/discover-open-cfps.py` calls `.../open-cfps` (`X-API-KEY: SESSIONIZE_SPEAKER_KEY`), applies the host's online/user-group filter, and emits the Step 2 candidate count deterministically instead of parsing the payload inline.
+  - **Evidence-gated freshness (#8):** `scripts/stamp-last-checked.py` no longer advances `_last_checked` unconditionally. The driver writes a `verify-evidence.json` marker, and the stamp advances the heartbeat only when ≥1 entry was resolved from a live response this run (or there was nothing to verify). A skipped call or total Sessionize outage now records `_last_checked_skipped` and exits 3 — so the run can't report a clean success or fool the `jbaruch/nanoclaw#601` work-evidence watchdog. `nightly-cfp-sync` reads the new `verification` field and, on `"skipped"`, holds the cadence cursor and retries next fire instead of resting 72h on an unverified run.
+  - The run-state checkpoint store's `prep`/`sessionize_results`/`decisions` stages collapse into a single `verify` stage.
+
+### Required environment
+
+- The CFP pipeline now reads two host-injected Sessionize keys from the container environment: `SESSIONIZE_SPEAKER_KEY` (open-CFP discovery) and `SESSIONIZE_EVENT_API_KEY` (event verification) — the same keys the NanoClaw host already held for its `sessionize_*` tools. `SESSIONIZE_API_BASE` optionally overrides the API base. See `.env.example` and README "Required environment."
+
 ## 0.1.6 — 2026-06-30
 
 ### Added

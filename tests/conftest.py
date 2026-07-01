@@ -168,3 +168,49 @@ def apply_sessionize_results():
         "apply_sessionize_results_under_test",
         "skills/check-cfps/scripts/apply-sessionize-results.py",
     )
+
+
+@pytest.fixture
+def verify_sessionize(tmp_path, monkeypatch):
+    """Load check-cfps/scripts/verify-sessionize.py with the run-state dir
+    pinned under tmp_path via `CFP_RUN_STATE_DIR` (where the evidence marker
+    lands). Returns (module, run_dir); the dir is NOT created up front.
+
+    The driver reuses prepare/apply via sibling importlib load, makes the
+    per-slug events call through the module-global `urllib.request.urlopen`
+    (tests monkeypatch it, the check-cfps-fetch idiom), reads
+    `SESSIONIZE_EVENT_API_KEY`/`SESSIONIZE_API_BASE` at main() time, and stamps
+    `run_date` from `module.datetime.now(timezone.utc)` (frozen-subclass
+    monkeypatch to cross a day boundary). Tests drive `module.drive(...)`
+    directly or `module.main([])` with an `io.StringIO` stdin + capsys."""
+    run_dir = tmp_path / "cfp-run"
+    monkeypatch.setenv("CFP_RUN_STATE_DIR", str(run_dir))
+    monkeypatch.delenv("SESSIONIZE_EVENT_API_KEY", raising=False)
+    monkeypatch.delenv("SESSIONIZE_API_BASE", raising=False)
+    module = _load(
+        "verify_sessionize_under_test",
+        "skills/check-cfps/scripts/verify-sessionize.py",
+    )
+    return module, run_dir
+
+
+@pytest.fixture
+def discover_open_cfps(tmp_path, monkeypatch):
+    """Load check-cfps/scripts/discover-open-cfps.py with `CFP_RUN_STATE_DIR`
+    and the Sessionize env cleared. Returns (module, state_path); the state
+    file is NOT created up front so callers choose present/absent.
+
+    Like verify-sessionize, it fetches via the module-global
+    `urllib.request.urlopen` (monkeypatched in tests) and reads
+    `SESSIONIZE_SPEAKER_KEY`/`SESSIONIZE_API_BASE` at main() time. Tests call
+    `module.build_candidates(events, existing_slugs)` directly for the parse,
+    or drive `module.main([...])` with `--state` + capsys for the I/O
+    contract."""
+    state_path = tmp_path / "cfp-state.json"
+    monkeypatch.delenv("SESSIONIZE_SPEAKER_KEY", raising=False)
+    monkeypatch.delenv("SESSIONIZE_API_BASE", raising=False)
+    module = _load(
+        "discover_open_cfps_under_test",
+        "skills/check-cfps/scripts/discover-open-cfps.py",
+    )
+    return module, state_path
