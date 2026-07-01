@@ -217,9 +217,9 @@ def test_source_a_unreachable_appends_warning_keeps_b(check_cfps_fetch, monkeypa
     _, out, _ = _run(module, monkeypatch, capsys)
     payload = json.loads(out)
     assert [c["name"] for c in payload["cfps"]] == ["OnlyB 2026"]
-    assert any(
-        "Source A (developers.events) unreachable" in w for w in payload["warnings"]
-    ), payload["warnings"]
+    assert any("Source A (developers.events) unreachable" in w for w in payload["warnings"]), (
+        payload["warnings"]
+    )
     # No "both empty" warning — B delivered content.
     assert not any("web search fallback needed" in w for w in payload["warnings"])
 

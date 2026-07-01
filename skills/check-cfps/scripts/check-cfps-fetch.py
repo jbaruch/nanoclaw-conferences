@@ -161,7 +161,7 @@ def fetch_developers_events(warnings: list) -> list:
             # log so systematic upstream format changes become visible
             # instead of producing an empty output.
             sys.stderr.write(
-                f"check-cfps-fetch: source A entry skipped " f"({type(exc).__name__}: {exc})\n"
+                f"check-cfps-fetch: source A entry skipped ({type(exc).__name__}: {exc})\n"
             )
             continue
 
@@ -224,7 +224,7 @@ def fetch_javaconferences(warnings: list) -> list:
         except Exception as exc:
             # Per-entry guard — log skip so feed-format changes surface.
             sys.stderr.write(
-                f"check-cfps-fetch: source B entry skipped " f"({type(exc).__name__}: {exc})\n"
+                f"check-cfps-fetch: source B entry skipped ({type(exc).__name__}: {exc})\n"
             )
             continue
 

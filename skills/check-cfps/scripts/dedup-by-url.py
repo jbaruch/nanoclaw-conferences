@@ -312,7 +312,7 @@ def main(argv: list[str]) -> int:
 
     if not args.state_path.exists():
         sys.stderr.write(
-            f"dedup-by-url: state file not found at {args.state_path} — " f"nothing to dedup\n"
+            f"dedup-by-url: state file not found at {args.state_path} — nothing to dedup\n"
         )
         if args.lookup:
             # Lookup-mode on a missing state file is also a no-op: no
@@ -338,7 +338,7 @@ def main(argv: list[str]) -> int:
         state = json.loads(args.state_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         sys.stderr.write(
-            f"dedup-by-url: failed to read {args.state_path}: " f"{type(exc).__name__}: {exc}\n"
+            f"dedup-by-url: failed to read {args.state_path}: {type(exc).__name__}: {exc}\n"
         )
         return 1
 
@@ -361,8 +361,7 @@ def main(argv: list[str]) -> int:
             _atomic_write(args.state_path, state)
         except OSError as exc:
             sys.stderr.write(
-                f"dedup-by-url: failed to write {args.state_path}: "
-                f"{type(exc).__name__}: {exc}\n"
+                f"dedup-by-url: failed to write {args.state_path}: {type(exc).__name__}: {exc}\n"
             )
             return 1
 

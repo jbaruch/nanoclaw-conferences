@@ -171,7 +171,7 @@ def main(argv: list[str]) -> int:
             return 1
         if entry.get("cohort") not in ("new", "stored"):
             sys.stderr.write(
-                f'prepare-sessionize-batch: entry {entry_id!r} needs '
+                f"prepare-sessionize-batch: entry {entry_id!r} needs "
                 f'`cohort` of "new" or "stored"; got {entry.get("cohort")!r}\n'
             )
             return 1
