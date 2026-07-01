@@ -2,6 +2,12 @@
 
 All notable changes to this tile are documented here.
 
+## 0.1.8 — 2026-07-01
+
+### Changed
+
+- Bumped the pinned `ruff` from `0.7.4` to `0.15.20` and reformatted the tree to match. Pure style (0.15.20 collapses adjacent implicit string concatenations that now fit on one line); no behavior change. Doing the bump-plus-reformat together keeps a bare Dependabot version-bump from landing red against the `ruff format --check` gate.
+
 ## 0.1.7 — 2026-06-30
 
 ### Changed

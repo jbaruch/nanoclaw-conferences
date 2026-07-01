@@ -106,8 +106,7 @@ def main(argv: list[str]) -> int:
 
     if not args.state_path.exists():
         sys.stderr.write(
-            f"backfill-source: state file not found at {args.state_path} — "
-            f"nothing to backfill\n"
+            f"backfill-source: state file not found at {args.state_path} — nothing to backfill\n"
         )
         print(
             json.dumps(
@@ -125,7 +124,7 @@ def main(argv: list[str]) -> int:
         state = json.loads(args.state_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         sys.stderr.write(
-            f"backfill-source: failed to read {args.state_path}: " f"{type(exc).__name__}: {exc}\n"
+            f"backfill-source: failed to read {args.state_path}: {type(exc).__name__}: {exc}\n"
         )
         return 1
 
@@ -169,7 +168,7 @@ def main(argv: list[str]) -> int:
                 raise
         except OSError as exc:
             sys.stderr.write(
-                f"backfill-source: failed to write {target}: " f"{type(exc).__name__}: {exc}\n"
+                f"backfill-source: failed to write {target}: {type(exc).__name__}: {exc}\n"
             )
             return 1
 

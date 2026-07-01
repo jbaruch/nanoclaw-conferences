@@ -92,7 +92,7 @@ def main(argv=None):
         state = json.loads(args.state.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         sys.stderr.write(
-            f"stamp-schema-version: cannot read {args.state}: " f"{type(exc).__name__}: {exc}\n"
+            f"stamp-schema-version: cannot read {args.state}: {type(exc).__name__}: {exc}\n"
         )
         return 1
     if not isinstance(state, dict):
