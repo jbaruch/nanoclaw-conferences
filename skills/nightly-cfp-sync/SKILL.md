@@ -4,6 +4,7 @@ description: "Cadence wrapper that runs check-cfps on its own schedule: refresh 
 cadence: "30 6 * * * (TZ=local)"
 agentModel: "claude-haiku-4-5-20251001"
 script: "scripts/precheck-nightly-cfp-sync.py"
+evidence: "cfp-state.json#_last_checked"
 ---
 
 # Nightly CFP Sync
