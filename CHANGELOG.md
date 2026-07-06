@@ -2,6 +2,12 @@
 
 All notable changes to this tile are documented here.
 
+## 0.1.9 — 2026-07-06
+
+### Added
+
+- `nightly-cfp-sync` declares a host-checked work-evidence contract: `evidence: "cfp-state.json#_last_checked"` frontmatter (jbaruch/nanoclaw#720/#721). After every fire, the host scheduler deterministically verifies `_last_checked` was advanced during the run; a run that reports success without freshening the cursor is recorded as `evidence-check:` error and its pinned SDK session is cleared so the next fire starts fresh. Complements the in-tile evidence gating (#8), which a session-precedent-polluted agent was observed to bypass by fabricating the stamper's report format wholesale — the host-side check cannot be fabricated from inside the container.
+
 ## 0.1.8 — 2026-07-01
 
 ### Changed
