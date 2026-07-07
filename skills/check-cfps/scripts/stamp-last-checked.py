@@ -31,9 +31,11 @@ stamp is now *gated on verification evidence*:
 A clean stamp clears any prior `_last_checked_skipped`. Only the two top-level
 `_`-prefixed config keys are touched; every CFP record and other config key is
 preserved. Atomic write (temp + fsync + os.replace, UTF-8, mode-preserving) so
-an interrupted run can't truncate the state file. The evidence marker lives in
-the run-state dir (`$CFP_RUN_STATE_DIR`, default
-`/workspace/group/state/cfp-run/`); override the file with `--evidence`.
+an interrupted run can't truncate the state file. The read-modify-write runs
+under the shared advisory lock (state_lock.py) so concurrent writers cannot
+lose updates. The evidence marker lives in the run-state dir
+(`$CFP_RUN_STATE_DIR`, default `/workspace/group/state/cfp-run/`); override
+the file with `--evidence`.
 
 Output (stdout): JSON. On a clean stamp:
 `{"_last_checked": "<iso>", "verification": "live"|"none-required"}`.
@@ -44,12 +46,34 @@ object / write failure; 3 verification not evidenced (gated refusal).
 """
 
 import argparse
+import importlib.util
 import json
 import os
 import sys
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+def _load_state_lock():
+    """Reuse the shared advisory-lock module from the sibling
+    state_lock.py so the cfp-state write discipline has exactly one
+    definition (same reuse pattern as backfill-name.py's
+    `_load_dedup_helpers`)."""
+    sibling = Path(__file__).with_name("state_lock.py")
+    spec = importlib.util.spec_from_file_location("_cfps_state_lock", sibling)
+    if spec is None or spec.loader is None:
+        raise ImportError(
+            f"cannot load state_lock.py from {sibling}: the check-cfps script "
+            "bundle looks incomplete — restore the sibling module next to "
+            "stamp-last-checked.py (or reinstall the tile) and retry"
+        )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+state_lock = _load_state_lock()
 
 DEFAULT_STATE_PATH = Path("/workspace/group/cfp-state.json")
 DEFAULT_RUN_DIR = Path("/workspace/group/state/cfp-run")
@@ -164,42 +188,55 @@ def main(argv=None):
     args = parser.parse_args(argv)
     evidence_path = args.evidence if args.evidence is not None else _default_evidence_path()
 
-    try:
-        state = json.loads(args.state.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-        sys.stderr.write(
-            f"stamp-last-checked: cannot read {args.state}: {type(exc).__name__}: {exc}\n"
-        )
-        return 1
-    if not isinstance(state, dict):
-        sys.stderr.write(
-            f"stamp-last-checked: {args.state} root is "
-            f"{type(state).__name__}, expected a JSON object\n"
-        )
-        return 1
-
-    now_dt = datetime.now(timezone.utc)
-    now = now_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
-    today = now_dt.date().isoformat()
-    advance, reason = verification_state(_read_evidence(evidence_path), today)
-
-    if advance:
-        state["_last_checked"] = now
-        # A clean run supersedes any earlier same-day gated refusal.
-        state.pop("_last_checked_skipped", None)
-        payload = {"_last_checked": now, "verification": reason}
-    else:
-        # Heartbeat does NOT advance: record a distinct skipped marker the
-        # watchdog reads and exit non-zero so the run can't report clean.
-        state["_last_checked_skipped"] = now
-        payload = {"_last_checked_skipped": now, "verification": "skipped", "reason": reason}
+    # The evidence marker is read-only input; only the cfp-state
+    # read→write below needs the advisory lock.
+    evidence = _read_evidence(evidence_path)
 
     try:
-        _atomic_write_json(args.state, state)
-    except OSError as exc:
-        sys.stderr.write(
-            f"stamp-last-checked: cannot write {args.state}: {type(exc).__name__}: {exc}\n"
-        )
+        with state_lock.locked(args.state):
+            try:
+                state = json.loads(args.state.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+                sys.stderr.write(
+                    f"stamp-last-checked: cannot read {args.state}: {type(exc).__name__}: {exc}\n"
+                )
+                return 1
+            if not isinstance(state, dict):
+                sys.stderr.write(
+                    f"stamp-last-checked: {args.state} root is "
+                    f"{type(state).__name__}, expected a JSON object\n"
+                )
+                return 1
+
+            now_dt = datetime.now(timezone.utc)
+            now = now_dt.strftime("%Y-%m-%dT%H:%M:%SZ")
+            today = now_dt.date().isoformat()
+            advance, reason = verification_state(evidence, today)
+
+            if advance:
+                state["_last_checked"] = now
+                # A clean run supersedes any earlier same-day gated refusal.
+                state.pop("_last_checked_skipped", None)
+                payload = {"_last_checked": now, "verification": reason}
+            else:
+                # Heartbeat does NOT advance: record a distinct skipped marker the
+                # watchdog reads and exit non-zero so the run can't report clean.
+                state["_last_checked_skipped"] = now
+                payload = {
+                    "_last_checked_skipped": now,
+                    "verification": "skipped",
+                    "reason": reason,
+                }
+
+            try:
+                _atomic_write_json(args.state, state)
+            except OSError as exc:
+                sys.stderr.write(
+                    f"stamp-last-checked: cannot write {args.state}: {type(exc).__name__}: {exc}\n"
+                )
+                return 1
+    except state_lock.LockTimeout as exc:
+        sys.stderr.write(f"stamp-last-checked: {exc}\n")
         return 1
 
     print(json.dumps(payload))

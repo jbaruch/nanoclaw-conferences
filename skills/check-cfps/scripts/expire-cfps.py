@@ -34,7 +34,9 @@ re-listed upstream with an extended deadline re-enters as a candidate
 and Step 8 rewrites the row from the fresh verdict.
 
 Idempotent: already-`expired` rows are not `open`/`approved`, so a
-second run finds nothing to do and does not write.
+second run finds nothing to do and does not write. The read-modify-write
+runs under the shared advisory lock (state_lock.py) so concurrent
+writers cannot lose updates.
 
 Usage:
   python3 expire-cfps.py [--state-path /path/to/cfp-state.json]
@@ -84,6 +86,26 @@ def _load_sibling(filename: str, attr: str):
 # concurrent-container atomic write (dedup-by-url.py owns the pattern).
 infer_source = _load_sibling("backfill-source.py", "infer_source")
 _atomic_write = _load_sibling("dedup-by-url.py", "_atomic_write")
+
+
+def _load_state_lock():
+    """Reuse the shared advisory-lock module from the sibling
+    state_lock.py so the cfp-state write discipline has exactly one
+    definition (same reuse pattern as `_load_sibling` above)."""
+    sibling = Path(__file__).with_name("state_lock.py")
+    spec = importlib.util.spec_from_file_location("_cfps_state_lock", sibling)
+    if spec is None or spec.loader is None:
+        raise ImportError(
+            f"cannot load state_lock.py from {sibling}: the check-cfps script "
+            "bundle looks incomplete — restore the sibling module next to "
+            "expire-cfps.py (or reinstall the tile) and retry"
+        )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+state_lock = _load_state_lock()
 
 DEFAULT_STATE_PATH = Path("/workspace/group/cfp-state.json")
 
@@ -201,45 +223,55 @@ def main(argv: list[str]) -> int:
         return 0
 
     try:
-        state = json.loads(args.state_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-        sys.stderr.write(
-            f"expire-cfps: failed to read {args.state_path}: {type(exc).__name__}: {exc}\n"
-        )
-        return 1
+        with state_lock.locked(args.state_path):
+            try:
+                state = json.loads(args.state_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+                sys.stderr.write(
+                    f"expire-cfps: failed to read {args.state_path}: {type(exc).__name__}: {exc}\n"
+                )
+                return 1
 
-    if not isinstance(state, dict):
-        sys.stderr.write(
-            f"expire-cfps: {args.state_path} root is "
-            f"{type(state).__name__}, expected dict; aborting\n"
-        )
-        return 1
+            if not isinstance(state, dict):
+                sys.stderr.write(
+                    f"expire-cfps: {args.state_path} root is "
+                    f"{type(state).__name__}, expected dict; aborting\n"
+                )
+                return 1
 
-    expired, skipped_user_actioned, skipped_sessionize, skipped_no_deadline, expired_slugs = expire(
-        state, today
-    )
+            (
+                expired,
+                skipped_user_actioned,
+                skipped_sessionize,
+                skipped_no_deadline,
+                expired_slugs,
+            ) = expire(state, today)
 
-    if expired > 0:
-        try:
-            _atomic_write(args.state_path, state)
-        except OSError as exc:
-            sys.stderr.write(
-                f"expire-cfps: failed to write {args.state_path}: {type(exc).__name__}: {exc}\n"
+            if expired > 0:
+                try:
+                    _atomic_write(args.state_path, state)
+                except OSError as exc:
+                    sys.stderr.write(
+                        f"expire-cfps: failed to write {args.state_path}: "
+                        f"{type(exc).__name__}: {exc}\n"
+                    )
+                    return 1
+
+            print(
+                json.dumps(
+                    {
+                        "expired": expired,
+                        "skipped_user_actioned": skipped_user_actioned,
+                        "skipped_sessionize": skipped_sessionize,
+                        "skipped_no_deadline": skipped_no_deadline,
+                        "expired_slugs": expired_slugs,
+                    }
+                )
             )
-            return 1
-
-    print(
-        json.dumps(
-            {
-                "expired": expired,
-                "skipped_user_actioned": skipped_user_actioned,
-                "skipped_sessionize": skipped_sessionize,
-                "skipped_no_deadline": skipped_no_deadline,
-                "expired_slugs": expired_slugs,
-            }
-        )
-    )
-    return 0
+            return 0
+    except state_lock.LockTimeout as exc:
+        sys.stderr.write(f"expire-cfps: {exc}\n")
+        return 1
 
 
 if __name__ == "__main__":

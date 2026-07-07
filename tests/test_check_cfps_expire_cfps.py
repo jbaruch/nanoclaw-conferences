@@ -514,5 +514,11 @@ def test_atomic_write_via_replace(expire_cfps, tmp_path, capsys, monkeypatch):
     assert rc == 0
     assert len(replace_calls) == 1
     assert _read_state(state_path)["zombie-conf-2024"]["status"] == "expired"
-    siblings = [p for p in tmp_path.iterdir() if p.name != "cfp-state.json"]
+    siblings = [
+        p
+        for p in tmp_path.iterdir()
+        # The advisory lock file is intentional and persistent (state_lock.py)
+        # — only orphan .tmp files count as atomicity leaks.
+        if p.name not in ("cfp-state.json", "cfp-state.json.lock")
+    ]
     assert siblings == [], f"orphan temp files left behind: {siblings}"

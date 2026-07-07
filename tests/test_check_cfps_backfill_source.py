@@ -11,9 +11,13 @@ Locks down the script's documented contract:
   - Missing state file is a no-op exit 0.
   - Read/write errors exit 1 with stderr diagnostic.
   - JSON output (last line of stdout) carries counters per the documented shape.
+  - The read-modify-write runs under the shared advisory lock
+    (state_lock.py): a concurrent committed update survives, and a
+    contended lock exits 1 with a stderr diagnostic.
 """
 
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -475,7 +479,13 @@ def test_atomic_write_via_replace(backfill_source, tmp_path, capsys, monkeypatch
     # and no orphan tmp file is left behind.
     final = json.loads(state_path.read_text(encoding="utf-8"))
     assert final["lambda-world-2026"]["source"] == "developers.events"
-    siblings = [p for p in tmp_path.iterdir() if p.name != "cfp-state.json"]
+    siblings = [
+        p
+        for p in tmp_path.iterdir()
+        # The advisory lock file is intentional and persistent (state_lock.py)
+        # — only orphan .tmp files count as atomicity leaks.
+        if p.name not in ("cfp-state.json", "cfp-state.json.lock")
+    ]
     assert siblings == [], f"orphan temp files left behind: {siblings}"
 
 
@@ -502,3 +512,88 @@ def test_infer_source_unit(backfill_source, url, expected):
     suffix-collision avoidance) without going through the full
     main() roundtrip."""
     assert backfill_source.infer_source(url) == expected
+
+
+def test_concurrent_committed_update_survives(backfill_source, state_lock, tmp_path, monkeypatch):
+    """Lost-update regression (jbaruch/nanoclaw-conferences#35): a
+    writer that commits while backfill-source is running must not have
+    its update discarded. The test holds the advisory lock, starts
+    backfill-source's main() in a thread (it blocks on the lock before
+    reading), commits a second record while the lock is still held,
+    then releases. The flock itself is the synchronization — no sleeps:
+    the thread cannot read the state file until the lock is released,
+    so it sees the concurrent commit instead of clobbering it.
+
+    main() runs in the worker thread, so its stdout is not asserted
+    here (capsys is same-thread); the on-disk outcome is the contract.
+    """
+    monkeypatch.delenv("CFP_STATE_LOCK_TIMEOUT", raising=False)
+    state_path = tmp_path / "cfp-state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "lambda-world-2026": {
+                    "status": "open",
+                    "cfp_url": "https://developers.events/cfps/lambda-world-2026/",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    thread = threading.Thread(
+        target=backfill_source.main,
+        args=(["--state-path", str(state_path)],),
+    )
+    with state_lock.locked(state_path):
+        thread.start()
+        # Simulate another writer committing while backfill-source is
+        # blocked on the lock: add a second record.
+        current = json.loads(state_path.read_text(encoding="utf-8"))
+        current["other-conf-2026"] = {
+            "status": "open",
+            "cfp_url": "https://sessionize.com/other-conf-2026",
+        }
+        state_path.write_text(json.dumps(current), encoding="utf-8")
+    thread.join(timeout=30)
+    assert not thread.is_alive(), "backfill-source never acquired the lock"
+
+    final = json.loads(state_path.read_text(encoding="utf-8"))
+    # The concurrent writer's record survived the backfill write...
+    assert "other-conf-2026" in final
+    # ...and the backfill itself happened (it read only after the lock
+    # was released, i.e. after the concurrent commit).
+    assert final["lambda-world-2026"]["source"] == "developers.events"
+
+
+def test_lock_timeout_exits_1_with_stderr(
+    backfill_source, state_lock, tmp_path, capsys, monkeypatch
+):
+    """When the advisory lock cannot be acquired within the timeout,
+    main() honors the script's exit contract: exit 1 with the
+    LockTimeout diagnostic on stderr, not a traceback. Same-thread
+    call, so capsys applies."""
+    monkeypatch.setenv("CFP_STATE_LOCK_TIMEOUT", "0")
+    state_path = tmp_path / "cfp-state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "lambda-world-2026": {
+                    "status": "open",
+                    "cfp_url": "https://developers.events/cfps/lambda-world-2026/",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    pre_run_content = state_path.read_text(encoding="utf-8")
+
+    with state_lock.locked(state_path, timeout=5.0):
+        rc = backfill_source.main(["--state-path", str(state_path)])
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "backfill-source:" in captured.err
+    assert "could not acquire" in captured.err
+    # Nothing was written while the lock was contended.
+    assert state_path.read_text(encoding="utf-8") == pre_run_content
