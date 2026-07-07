@@ -15,13 +15,36 @@ This script collapses such duplicates in a single pass:
   2. For each group with >1 slug, pick a winner:
        a) `user_actioned: true` wins (immutability invariant from
           `references/contracts.md`).
-       b) Else: the slug whose `source` matches the URL's host
+       b) Else: `shown_in_brief: true` (sticky) wins — the previously
+          surfaced CFP carries `status`/`bot_notes` semantics the
+          brief relies on. When multiple sticky entries collide, the
+          c) → e) chain runs within the sticky cohort.
+       c) Else: the slug whose `source` matches the URL's host
           (sessionize.com → sessionize-speaker-api, etc.) — that row
           carries authoritative API-driven metadata.
-       c) Else: the alphabetically-earliest slug, for determinism.
+       d) Else: the slug whose `source` ranks highest in
+          SOURCE_PRIORITY (javaconferences.org > sessionize-speaker-api
+          > developers.events > anything else). Self-hosted CFP URLs
+          (`*.cfp.dev`, a conference's own domain) match no known host,
+          so without this tier an alphabetical accident could keep the
+          developers.events copy and silently drop the
+          javaconferences.org source tag that drives Tier-1
+          auto-approve (jbaruch/nanoclaw-conferences#25).
+       e) Else: the alphabetically-earliest slug, for determinism.
   3. Merge non-overlapping `bot_notes` from each loser into the winner.
-     Skipped when the winner is `user_actioned: true` (immutability).
-  4. Delete the loser keys.
+     Skipped when the winner is `user_actioned: true` (immutability)
+     or `shown_in_brief: true` (the Step 8 sticky rule preserves
+     `bot_notes`).
+  4. Fill the winner's unusable `name`, `city`, and `conf_date` from
+     the losers (first loser in sorted order with a usable value —
+     "usable" meaning a non-empty, non-whitespace string; junk shapes
+     from schema drift count as missing). A merge must never discard
+     the only copy that carried a `name` — a nameless survivor is
+     invisible to the priority matcher and the brief
+     (jbaruch/nanoclaw-conferences#23/#25). Skipped when the winner is
+     `user_actioned: true` (immutability); sticky winners only have
+     `status`/`bot_notes` protected, so gap-fill applies to them.
+  5. Delete the loser keys.
 
 Idempotent. A second run sees no remaining collisions and is a no-op.
 
@@ -33,6 +56,7 @@ Output (stdout, JSON last line):
     "groups_merged":    <int>,   # number of normalised URLs that had >1 slug
     "slugs_dropped":    <int>,   # losers removed
     "notes_merged":     <int>,   # losers whose bot_notes were appended to the winner
+    "fields_inherited": <int>,   # missing winner fields filled from losers
     "skipped_multi_user_actioned": <int>,  # groups with >1 user_actioned entries (manual review)
     "merges":           [<merge-record>]   # per-group provenance
   }
@@ -63,6 +87,46 @@ KNOWN_HOSTS = (
     ("developers.events", "developers.events"),
     ("javaconferences.org", "javaconferences.org"),
 )
+
+# Winner-selection tier (c): when no slug's source matches the URL's
+# host (self-hosted CFP forms — `*.cfp.dev`, a conference's own
+# domain), prefer the copy from the feed whose attribution carries the
+# most downstream weight. javaconferences.org outranks everything
+# because its source tag drives the Tier-1 auto-approve and the `java`
+# priority interest (jbaruch/nanoclaw-conferences#25); Sessionize
+# outranks developers.events because its rows carry API-driven
+# metadata. Unknown sources rank last.
+SOURCE_PRIORITY = (
+    "javaconferences.org",
+    "sessionize-speaker-api",
+    "developers.events",
+)
+
+# Merge step: fields the winner inherits from its losers when the
+# winner's own value is missing or empty. `name` is the load-bearing
+# one — match-priorities.py and the brief are blind to a nameless
+# record (jbaruch/nanoclaw-conferences#23). `deadline` is deliberately
+# absent: a loser's deadline may be stale and must never overwrite or
+# fill the winner's.
+INHERITABLE_FIELDS = ("name", "city", "conf_date")
+
+
+def _source_rank(source: object) -> int:
+    """Position of `source` in SOURCE_PRIORITY; unknown/missing
+    sources rank after every known one."""
+    if isinstance(source, str) and source in SOURCE_PRIORITY:
+        return SOURCE_PRIORITY.index(source)
+    return len(SOURCE_PRIORITY)
+
+
+def _usable(value: object) -> bool:
+    """True for a non-empty, non-whitespace string. Whitespace-only
+    strings and non-string junk (schema drift) count as missing —
+    both for deciding whether the winner needs a fill AND for whether
+    a loser's value is worth inheriting; otherwise a `name: "  "` or
+    `name: [...]` winner would block inheritance and stay effectively
+    nameless downstream."""
+    return isinstance(value, str) and bool(value.strip())
 
 
 def normalise_url(url: object) -> str | None:
@@ -118,10 +182,15 @@ def _pick_winner(slugs: list[str], state: dict) -> tuple[str | None, bool]:
          relies on; picking it as winner means those fields survive
          the dedup automatically. If multiple sticky entries collide
          (rare — same URL surfaced twice with sticky), the
-         source-host-match → alphabetical chain runs WITHIN the
-         sticky cohort so we still pick the authoritative one.
+         source-host-match → source-priority → alphabetical chain runs
+         WITHIN the sticky cohort so we still pick the authoritative
+         one.
       c) `source` matches the URL's host — authoritative-API row.
-      d) Alphabetically-earliest slug — deterministic tiebreak.
+      d) Highest-ranking `source` per SOURCE_PRIORITY — preserves the
+         javaconferences.org attribution (and its Tier-1 auto-approve)
+         when the CFP URL is self-hosted and rule (c) can't fire
+         (jbaruch/nanoclaw-conferences#25).
+      e) Alphabetically-earliest slug — deterministic tiebreak.
     """
     user_actioned = [s for s in slugs if state[s].get("user_actioned") is True]
     if len(user_actioned) > 1:
@@ -143,7 +212,9 @@ def _pick_winner(slugs: list[str], state: dict) -> tuple[str | None, bool]:
         # (only one canonical pairing per host) but pick the
         # alphabetically-earliest for determinism if it does.
         return sorted(source_match)[0], False
-    return sorted(candidate_pool)[0], False
+    best_rank = min(_source_rank(state[s].get("source")) for s in candidate_pool)
+    ranked = [s for s in candidate_pool if _source_rank(state[s].get("source")) == best_rank]
+    return sorted(ranked)[0], False
 
 
 def dedup(state: dict) -> dict:
@@ -164,6 +235,7 @@ def dedup(state: dict) -> dict:
     groups_merged = 0
     slugs_dropped = 0
     notes_merged = 0
+    fields_inherited = 0
     skipped_multi_user_actioned = 0
     merges: list[dict] = []
 
@@ -190,11 +262,24 @@ def dedup(state: dict) -> dict:
         winner_notes = winner_entry.get("bot_notes") or ""
 
         for loser in losers:
-            loser_notes = state[loser].get("bot_notes") or ""
+            loser_entry = state[loser]
+            loser_notes = loser_entry.get("bot_notes") or ""
             if not skip_notes_merge and loser_notes and loser_notes not in winner_notes:
                 sep = " | " if winner_notes else ""
                 winner_notes = f"{winner_notes}{sep}[merged from {loser}]: {loser_notes}"
                 notes_merged += 1
+            # Fill gaps in the winner from the loser before it goes.
+            # `user_actioned` winners stay untouched (immutability);
+            # sticky winners only have status/bot_notes protected, so
+            # metadata gap-fill is allowed on them.
+            if not winner_actioned:
+                for field in INHERITABLE_FIELDS:
+                    if _usable(winner_entry.get(field)):
+                        continue
+                    value = loser_entry.get(field)
+                    if _usable(value):
+                        winner_entry[field] = value
+                        fields_inherited += 1
             del state[loser]
             slugs_dropped += 1
 
@@ -207,6 +292,7 @@ def dedup(state: dict) -> dict:
         "groups_merged": groups_merged,
         "slugs_dropped": slugs_dropped,
         "notes_merged": notes_merged,
+        "fields_inherited": fields_inherited,
         "skipped_multi_user_actioned": skipped_multi_user_actioned,
         "merges": merges,
     }
@@ -327,6 +413,7 @@ def main(argv: list[str]) -> int:
                         "groups_merged": 0,
                         "slugs_dropped": 0,
                         "notes_merged": 0,
+                        "fields_inherited": 0,
                         "skipped_multi_user_actioned": 0,
                         "merges": [],
                     }
