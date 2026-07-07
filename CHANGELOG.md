@@ -2,11 +2,18 @@
 
 All notable changes to this tile are documented here.
 
+## 0.1.19 — 2026-07-08
+
+### Fixed
+
+- cfp-state.json writers can no longer lose each other's updates (jbaruch/nanoclaw-conferences#35). The read-modify-write in every mutator (`backfill-source.py`, `backfill-name.py`, `dedup-by-url.py`, `expire-cfps.py`, `stamp-schema-version.py`, `stamp-last-checked.py`) now runs under a shared advisory `fcntl.flock` on a sibling `cfp-state.json.lock` file — new `state_lock.py` module, loaded via the existing sibling-import pattern. The previous temp-file + `os.replace` discipline only prevented partial files; two concurrent writers reading the same old state still silently dropped whichever write landed first. Lock acquisition blocks up to 30s (CFP_STATE_LOCK_TIMEOUT env override), then exits 1 with a diagnostic. Read-only consumers (`check-cfps-fetch.py`) stay lock-free — `os.replace` already guarantees them a complete snapshot. A threaded regression test proves a concurrently committed record survives another writer's RMW.
+- The Step 8 state write itself moved behind the same lock: new `scripts/commit-state.py` is the single committer for the run's working set (the agent never writes cfp-state.json directly). It applies per-slug replacements against a fresh locked read, so concurrent updates to other slugs survive, and re-checks `user_actioned: true` on disk at commit time so a mid-run user action is never overwritten. The external `morning-brief --mark-shown` writer is tracked separately for lock adoption.
+
 ## 0.1.18 — 2026-07-07
 
 ### Fixed
 
-- Failed verification checkpoints are now invalidated before a same-day retry (jbaruch/nanoclaw-conferences#31). When `stamp-last-checked.py` exits 3 (verification not evidenced), the run-state store used to keep the saved `verify`/`working_set` artifacts, so a same-day retry resumed straight to Step 8 and repeated the heartbeat refusal without a new Sessionize call. New `run-state.py invalidate <stage>...` subcommand removes named stage artifacts (plus the driver's `verify-evidence.json` marker) and drops them from `manifest.completed`; SKILL.md Step 8 item 11 now runs it on exit 3 so the retry keeps `fetch`/`candidates` but re-runs Step 5 live.
+- Failed verification checkpoints are now invalidated before a same-day retry (jbaruch/nanoclaw-conferences#31). When `stamp-last-checked.py` exits 3 (verification not evidenced), the run-state store used to keep the saved `verify`/`working_set` artifacts, so a same-day retry resumed straight to Step 8 and repeated the heartbeat refusal without a new Sessionize call. New `run-state.py invalidate <stage>...` subcommand removes named stage artifacts (plus the driver's `verify-evidence.json` marker) and drops them from `manifest.completed`; SKILL.md Step 8 item 11 now runs it on exit 3 so the retry keeps `fetch`/`candidates` but re-runs Step 5 live (renumbered to item 12 by 0.1.19's commit-state step).
 
 ## 0.1.17 — 2026-07-07
 
