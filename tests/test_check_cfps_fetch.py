@@ -569,6 +569,23 @@ def test_embedded_name_year_beats_conf_date_year(check_cfps_fetch, monkeypatch, 
     assert cfps[0]["slug"] == "pyconf-2026"
 
 
+def test_mid_name_year_not_duplicated_in_slug(check_cfps_fetch, monkeypatch, capsys):
+    """A year in the middle of the name is used as the slug year and
+    removed from the base — not left in place to be duplicated
+    ("kubecon-2026-eu-2026")."""
+    module, _, _ = check_cfps_fetch
+    src_b = [_src_b_entry("KubeCon 2026 EU", (_FROZEN_TODAY + timedelta(days=15)).isoformat())]
+    _patch_urlopen(monkeypatch, source_a=[], source_b=src_b)
+
+    _, out, _ = _run(module, monkeypatch, capsys)
+    cfps = json.loads(out)["cfps"]
+    assert cfps[0]["slug"] == "kubecon-eu-2026"
+
+
+@pytest.mark.skipif(
+    not hasattr(time, "tzset"),
+    reason="time.tzset() unavailable on this platform (Windows) — cannot shift the host TZ",
+)
 def test_source_a_epoch_conversion_is_utc(check_cfps_fetch, monkeypatch, capsys):
     """Source-A epoch-ms fields must convert in UTC regardless of the
     host timezone. A deadline at 23:00 UTC is already 'tomorrow' in

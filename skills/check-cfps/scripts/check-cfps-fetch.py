@@ -84,10 +84,13 @@ def make_slug(name: str, conf_date: str = "", deadline: str = "") -> str:
     the year of its own dates, or it misses its existing cfp-state row
     across year boundaries and dodges sent/dismissed/remind filtering."""
     lower = name.lower().strip()
-    # Extract trailing year if present
     year_match = re.search(r"\b(20\d\d)\b", lower)
     if year_match:
         year = year_match.group(1)
+        # Drop the matched year token wherever it sits (it is re-appended
+        # as the suffix) — stripping only a trailing year would duplicate
+        # a mid-name year: "KubeCon 2026 EU" → "kubecon-2026-eu-2026".
+        base = (lower[: year_match.start()] + " " + lower[year_match.end() :]).strip()
     else:
         year = ""
         for candidate in (conf_date, deadline):
@@ -97,8 +100,7 @@ def make_slug(name: str, conf_date: str = "", deadline: str = "") -> str:
                 break
         if not year:
             year = str(date.today().year)
-    # Remove trailing year from base (will re-append)
-    base = re.sub(r"\s*20\d\d\s*$", "", lower).strip()
+        base = lower
     slug_base = re.sub(r"[^a-z0-9]+", "-", base).strip("-")
     return f"{slug_base}-{year}"
 
