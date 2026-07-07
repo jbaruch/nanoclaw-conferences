@@ -2,6 +2,14 @@
 
 All notable changes to this tile are documented here.
 
+## 0.1.13 — 2026-07-07
+
+### Fixed
+
+- `check-cfps` dedup no longer silently drops the javaconferences.org attribution (and the `name`) when a conference appears in multiple feeds with a self-hosted CFP URL (jbaruch/nanoclaw-conferences#25, Devoxx Morocco). `dedup-by-url.py` gains a source-priority winner tier (javaconferences.org > sessionize-speaker-api > developers.events) between the source-host-match rule and the alphabetical tiebreak, and the merge now fills the winner's missing `name`/`city`/`conf_date` from the dropped copies (never `deadline`; `user_actioned` winners stay untouched). New `fields_inherited` counter in the script's output.
+- Duplicate slugs can no longer resurrect after a dedup merge (jbaruch/nanoclaw-conferences#24, vibe-coding-con). The Step 8 `--lookup` key-rewrite now covers the full in-memory working set (stored rows included, not just Steps 2–4 candidates), and a post-write dedup re-run guards the on-disk state so no run ends with two slugs for one CFP.
+- Nameless CFP records no longer rot invisibly (jbaruch/nanoclaw-conferences#23, Devoxx Morocco expired unsurfaced). New `scripts/backfill-name.py` derives a fallback display name from the slug (year suffix stripped, title-cased) or the `cfp_url`, runs at the top of Step 5 so every stored record is visible to `match-priorities.py` and Tier-3 relevance analysis, and doubles as the one-shot repair for already-damaged state. `user_actioned: true` entries are never touched (immutability invariant); nameless ones surface in a `skipped_user_actioned` counter.
+
 ## 0.1.9 — 2026-07-06
 
 ### Added

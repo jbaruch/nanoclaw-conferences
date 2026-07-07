@@ -61,6 +61,21 @@ def backfill_source():
 
 
 @pytest.fixture
+def backfill_name():
+    """Load check-cfps/scripts/backfill-name.py.
+
+    Same CLI shape as `backfill_source`: `--state-path` arg, JSON to
+    stdout, no module-level paths to monkeypatch. The module reuses
+    `normalise_url` and `_atomic_write` from the sibling
+    dedup-by-url.py at import time, so loading it exercises that
+    import path too."""
+    return _load(
+        "backfill_name_under_test",
+        "skills/check-cfps/scripts/backfill-name.py",
+    )
+
+
+@pytest.fixture
 def stamp_schema_version():
     """Load check-cfps/scripts/stamp-schema-version.py.
 

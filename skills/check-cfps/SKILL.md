@@ -58,6 +58,14 @@ Read `/workspace/trusted/user_professional.md` for Baruch's current speaking top
 
 ## Step 5 — Source-aware verification
 
+**Pre-verify: name repair.** Before assembling the stored cohort, run the deterministic name backfill so no nameless record reaches Step 6 blind (a record without `name` is invisible to the priority matcher and the brief — jbaruch/nanoclaw-conferences#23):
+
+```bash
+python3 /home/node/.claude/skills/tessl__check-cfps/scripts/backfill-name.py
+```
+
+It guarantees a usable `name` on every record it can, touching nothing else and never touching `user_actioned: true` entries (immutability per `references/contracts.md`); the derivation rules are the script's contract (`scripts/backfill-name.py` docstring). Surface a non-zero `unnamed_remaining` or `skipped_user_actioned` in the run report. Abort on non-zero exit (state file unreadable).
+
 Verify two cohorts:
 - **New candidates** from Steps 2–4.
 - **Already-stored `open`/`approved` entries** — every slug in `cfp-state.json` with `status in (open, approved)`.
@@ -130,20 +138,20 @@ If the prefilter exits non-zero (malformed config → exit 1, malformed records 
 python3 /home/node/.claude/skills/tessl__check-cfps/scripts/dedup-by-url.py
 ```
 
-Winner-selection priority (earlier wins): a) `user_actioned: true`; b) `shown_in_brief: true`; c) `source` matches URL's host; d) alphabetically-earliest slug. Skips collision group entirely when ≥2 `user_actioned` entries share one URL (surfaces on stderr).
+Winner selection, source-priority ranking, and merge-field inheritance are the script's contract — see the `scripts/dedup-by-url.py` docstring; do not re-derive them in prose. What the skill relies on: `user_actioned` entries always win and are never mutated, and priority-bearing source attribution plus the `name` survive the merge (jbaruch/nanoclaw-conferences#23/#25). Groups the script refuses to resolve are reported in `skipped_multi_user_actioned` (stderr detail) — surface them for manual review.
 
-Then for in-memory candidates from Steps 2–4, invoke `--lookup` mode:
+Then for EVERY in-memory entry you are about to write — new candidates from Steps 2–4 AND stored rows carried through Steps 5–7 — invoke `--lookup` mode:
 
 ```bash
-printf '%s\n' "<candidate-1.cfp_url>" "<candidate-2.cfp_url>" ... \
+printf '%s\n' "<entry-1.cfp_url>" "<entry-2.cfp_url>" ... \
   | python3 /home/node/.claude/skills/tessl__check-cfps/scripts/dedup-by-url.py --lookup
 ```
 
-Reads newline-separated URLs from stdin; emits `{<input_url>: <existing_slug_or_null>}` JSON. For every non-null value, rewrite the candidate's key in the in-memory list to that existing slug. Idempotent.
+Reads newline-separated URLs from stdin; emits `{<input_url>: <existing_slug_or_null>}` JSON. For every non-null value, rewrite that entry's key in the in-memory set to the returned slug. This matters for stored rows too: the dedup pass above may have deleted a stored row's slug as a duplicate, and writing it back under its old key would resurrect the duplicate the dedup just removed (jbaruch/nanoclaw-conferences#24). If the rewrite makes two in-memory entries share a slug, they are both updates to that one state row — apply the priority rules below once for that slug. Idempotent.
 
 Then apply priority rules (earlier wins):
 
-1. **`user_actioned: true`** — preserve the entry's decision + metadata fields untouched: the bot does not refresh `updated`/`last_verified` (rules 5/6 apply only to entries actively written this run, not to preserved `user_actioned` ones) and does not re-tag `matched_interests`. The ONLY field stamped on these is `schema_version` (owner metadata, rule 9).
+1. **`user_actioned: true`** — preserve the entry's decision + metadata fields untouched: the bot does not refresh `updated`/`last_verified` (rules 5/6 apply only to entries actively written this run, not to preserved `user_actioned` ones) and does not re-tag `matched_interests`. The ONLY field stamped on these is `schema_version` (owner metadata, rule 10).
 2. **Sticky (`shown_in_brief: true`)** — preserve `status` and `bot_notes`. Allowed updates: `deadline`, `city`, `conf_date`, `updated`, `last_verified`, `stale` + `⚠️ STALE DATA` prefix. Exception: Step 5 confirmed closed or online overrides stickiness.
 3. **Existing `open`/`approved` without sticky** — update status, `bot_notes`, metadata. Downgrade-to-dismissed MUST set `status: "dismissed"`.
 4. **New entries** — write status and `bot_notes` from Steps 6–7. Inherit `_verified_this_run: true` from Step 5. New entries that fail Sessionize verification are dropped.
@@ -151,7 +159,9 @@ Then apply priority rules (earlier wins):
 6. Set `last_verified` to today for every `_verified_this_run: true` entry.
 7. `_verify_failed: true` AND status still `open`/`approved`: persist `stale: true` and prepend the canonical stale prefix per `references/contracts.md` (idempotent). Cleared on next successful verification.
 8. Persist `matched_interests` from Step 6 on every `open`/`approved` entry it tagged this run. When Step 6 cleared it (priorities config missing/empty), delete the field from those entries; preserve the prior value untouched on `user_actioned: true` entries.
-9. Do NOT hand-stamp `schema_version`. After the state write, run the deterministic stamper — the single source of stamping (owner migration per `references/state-management.md` "Schema version & ownership"):
+9. **Post-write dedup guard.** After the state write, re-run `dedup-by-url.py` (same invocation as the pre-write pass). This is the deterministic backstop against duplicate resurrection: if any write re-created a slug the pre-write dedup had merged away, this pass collapses it again before the stampers run, so on-disk state never ends a run with two slugs for one CFP (jbaruch/nanoclaw-conferences#24). A clean run reports `slugs_dropped: 0`; a non-zero count means the lookup rewrite above was missed — surface it in the run report.
+
+10. Do NOT hand-stamp `schema_version`. After the state write, run the deterministic stamper — the single source of stamping (owner migration per `references/state-management.md` "Schema version & ownership"):
 
    ```bash
    python3 /home/node/.claude/skills/tessl__check-cfps/scripts/stamp-schema-version.py
@@ -159,21 +169,21 @@ Then apply priority rules (earlier wins):
 
    It stamps `schema_version: 1` on EVERY record (incl. `user_actioned`, `dismissed`, `sent`, `remind`), idempotently, and rewrites the file only when something changed. Output: `{"total": M, "stamped": N}`. A non-zero exit means the state file is missing/unreadable — surface it.
 
-10. Do NOT hand-write the top-level `_last_checked`. After stamping schema versions, run the deterministic freshness stamper — the single writer of `_last_checked`:
+11. Do NOT hand-write the top-level `_last_checked`. After stamping schema versions, run the deterministic freshness stamper — the single writer of `_last_checked`:
 
    ```bash
    python3 /home/node/.claude/skills/tessl__check-cfps/scripts/stamp-last-checked.py
    ```
 
-   It is **evidence-gated** (jbaruch/nanoclaw-conferences#8): it advances `_last_checked` only when the `verify-sessionize.py` driver left a `verify-evidence.json` marker for this run showing ≥1 entry resolved from a live response (or there was nothing to verify). Output on a clean stamp: `{"_last_checked": "<iso>", "verification": "live"|"none-required"}`, exit 0. If verification did not happen (driver skipped, or a total Sessionize outage), it does NOT advance the heartbeat — it writes `_last_checked_skipped` and **exits 3**: treat that exit like a stamp failure (do NOT proceed to clear the checkpoint in item 11; report a skipped-verification run). Exit 1 means the state file is missing/unreadable — surface it. Freshness lives here, not in per-record `updated`.
+   It is **evidence-gated** (jbaruch/nanoclaw-conferences#8): it advances `_last_checked` only when the `verify-sessionize.py` driver left a `verify-evidence.json` marker for this run showing ≥1 entry resolved from a live response (or there was nothing to verify). Output on a clean stamp: `{"_last_checked": "<iso>", "verification": "live"|"none-required"}`, exit 0. If verification did not happen (driver skipped, or a total Sessionize outage), it does NOT advance the heartbeat — it writes `_last_checked_skipped` and **exits 3**: treat that exit like a stamp failure (do NOT proceed to clear the checkpoint in item 12; report a skipped-verification run). Exit 1 means the state file is missing/unreadable — surface it. Freshness lives here, not in per-record `updated`.
 
-11. The run completed successfully — clear the resume checkpoint store so the next run starts fresh:
+12. The run completed successfully — clear the resume checkpoint store so the next run starts fresh:
 
    ```bash
    python3 /home/node/.claude/skills/tessl__check-cfps/scripts/run-state.py done
    ```
 
-   Only here, after the state write and both stampers succeeded — and only if the freshness stamper (item 10) exited 0. If the stamper exited 3 (verification not evidenced) or an earlier step failed and you stopped, do NOT clear — the saved stages let a same-day retry resume (`references/run-state.md`).
+   Only here, after the state write and both stampers succeeded — and only if the freshness stamper (item 11) exited 0. If the stamper exited 3 (verification not evidenced) or an earlier step failed and you stopped, do NOT clear — the saved stages let a same-day retry resume (`references/run-state.md`).
 
 After writing cfp-state.json, emit the run's verification report inside an `<internal>` block. `verification` is the freshness stamper's verdict — `"live"`/`"none-required"` when it advanced `_last_checked`, or `"skipped"` when it exited 3 (no live verification this run):
 
