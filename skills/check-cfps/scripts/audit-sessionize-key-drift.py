@@ -116,7 +116,7 @@ def main(argv: list[str]) -> int:
 
     try:
         state = json.loads(args.state_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         sys.stderr.write(
             f"audit-sessionize-key-drift: failed to read {args.state_path}: "
             f"{type(exc).__name__}: {exc}\n"

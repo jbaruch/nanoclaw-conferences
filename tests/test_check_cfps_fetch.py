@@ -18,7 +18,9 @@ Locks down the documented contract per `coding-policy: testing-standards`:
   - Output: `{cfps, warnings, checked_at}` — `cfps` is deduplicated by
     case-insensitive name (first wins) and sorted ascending by
     `deadline`; `checked_at` is a UTC ISO-8601 string with `Z` suffix
-  - Always exits 0 — the agent decides what to do with the output
+  - Exits 0 on success; exits 1 (fail-closed) when `cfp-state.json`
+    exists but cannot be read or parsed, so terminal-state filtering
+    is never silently skipped
 
 Tests freeze `module.date` (today() AND timezone-deterministic
 fromtimestamp()) and `module.datetime` (now()) so days_left math,
@@ -432,19 +434,53 @@ def test_blocked_prefix_filters_case_insensitive(check_cfps_fetch, monkeypatch, 
     assert names == ["Allowed 2026"]
 
 
-def test_corrupt_state_file_emits_warning_and_continues(check_cfps_fetch, monkeypatch, capsys):
-    """Malformed `cfp-state.json` → warning, no state filtering applied
-    (everything passes through), pipeline still produces output."""
+def test_corrupt_state_file_aborts(check_cfps_fetch, monkeypatch, capsys):
+    """Malformed `cfp-state.json` → hard failure (exit 1, stderr diagnostic,
+    no CFP output). Failing open with `{}` would drop sent/dismissed/remind
+    filtering and resurface already-actioned CFPs as new."""
     module, state_path, _ = check_cfps_fetch
     state_path.write_text("{not json")
 
     src_b = [_src_b_entry("StillShips 2026", (_FROZEN_TODAY + timedelta(days=12)).isoformat())]
     _patch_urlopen(monkeypatch, source_a=[], source_b=src_b)
 
-    _, out, _ = _run(module, monkeypatch, capsys)
-    payload = json.loads(out)
-    assert any("Failed to load cfp-state.json" in w for w in payload["warnings"])
-    assert [c["name"] for c in payload["cfps"]] == ["StillShips 2026"]
+    code, out, err = _run(module, monkeypatch, capsys)
+    assert code == 1
+    assert "cannot read" in err
+    assert str(state_path) in err
+    assert out == ""
+
+
+def test_non_object_state_root_aborts(check_cfps_fetch, monkeypatch, capsys):
+    """Syntactically valid JSON with a non-object root (e.g. `[]`) is
+    invalid state — abort with a diagnostic, not an AttributeError
+    traceback later in apply_state_filter."""
+    module, state_path, _ = check_cfps_fetch
+    state_path.write_text("[]")
+
+    src_b = [_src_b_entry("StillShips 2026", (_FROZEN_TODAY + timedelta(days=12)).isoformat())]
+    _patch_urlopen(monkeypatch, source_a=[], source_b=src_b)
+
+    code, out, err = _run(module, monkeypatch, capsys)
+    assert code == 1
+    assert "expected a JSON object" in err
+    assert str(state_path) in err
+    assert out == ""
+
+
+def test_invalid_utf8_state_file_aborts(check_cfps_fetch, monkeypatch, capsys):
+    """A state file that exists but is not valid UTF-8 → same hard failure
+    as malformed JSON, not a traceback and not fail-open."""
+    module, state_path, _ = check_cfps_fetch
+    state_path.write_bytes(b"\xff\xfe{}")
+
+    src_b = [_src_b_entry("StillShips 2026", (_FROZEN_TODAY + timedelta(days=12)).isoformat())]
+    _patch_urlopen(monkeypatch, source_a=[], source_b=src_b)
+
+    code, out, err = _run(module, monkeypatch, capsys)
+    assert code == 1
+    assert "cannot read" in err
+    assert out == ""
 
 
 # ---------------------------------------------------------------------------
