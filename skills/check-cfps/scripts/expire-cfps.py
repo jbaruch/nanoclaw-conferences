@@ -85,6 +85,8 @@ def _load_sibling(filename: str, attr: str):
 infer_source = _load_sibling("backfill-source.py", "infer_source")
 _atomic_write = _load_sibling("dedup-by-url.py", "_atomic_write")
 
+DEFAULT_STATE_PATH = Path("/workspace/group/cfp-state.json")
+
 SESSIONIZE_SOURCE = "sessionize-speaker-api"
 EXPIRABLE_STATUSES = ("open", "approved")
 
@@ -169,8 +171,8 @@ def main(argv: list[str]) -> int:
     parser.add_argument(
         "--state-path",
         type=Path,
-        default=Path("/workspace/group/cfp-state.json"),
-        help="Path to cfp-state.json (default: /workspace/group/cfp-state.json)",
+        default=DEFAULT_STATE_PATH,
+        help=f"Path to cfp-state.json (default: {DEFAULT_STATE_PATH})",
     )
     parser.add_argument(
         "--today",
