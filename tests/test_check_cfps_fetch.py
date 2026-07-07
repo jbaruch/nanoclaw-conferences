@@ -600,9 +600,15 @@ def test_source_a_epoch_conversion_is_utc(check_cfps_fetch, monkeypatch, capsys)
     _patch_urlopen(monkeypatch, source_a=[entry], source_b=[])
 
     old_tz = os.environ.get("TZ")
-    os.environ["TZ"] = "Pacific/Kiritimati"  # UTC+14, no DST
+    # POSIX TZ string, not a zoneinfo name: "GMT-14" means UTC+14 (POSIX
+    # inverts the sign) and needs no tzdata entry, so the shift works on
+    # minimal images too.
+    os.environ["TZ"] = "GMT-14"
     time.tzset()
     try:
+        # Prove the shift took effect — a no-op tzset would leave the
+        # process on UTC and make this regression test vacuous.
+        assert time.timezone == -14 * 3600, "TZ shift did not take effect"
         _, out, _ = _run(module, monkeypatch, capsys)
         cfps = json.loads(out)["cfps"]
         assert cfps[0]["deadline"] == deadline_day.isoformat()
