@@ -102,7 +102,8 @@ def locked(state_path: Path, timeout: float | None = None):
     or DEFAULT_TIMEOUT), polling a non-blocking flock. Raises LockTimeout
     on expiry and LockError when the lock file cannot be created, so
     callers handle every lock failure through one except clause."""
-    deadline = time.monotonic() + _effective_timeout(timeout)
+    effective = _effective_timeout(timeout)
+    deadline = time.monotonic() + effective
     try:
         fd = os.open(lock_path_for(state_path), os.O_CREAT | os.O_RDWR, 0o644)
     except OSError as exc:
@@ -120,7 +121,7 @@ def locked(state_path: Path, timeout: float | None = None):
                 if time.monotonic() >= deadline:
                     raise LockTimeout(
                         f"could not acquire {lock_path_for(state_path)} within "
-                        f"{_effective_timeout(timeout):g}s — another cfp-state writer "
+                        f"{effective:g}s — another cfp-state writer "
                         f"holds it; retry once it finishes"
                     ) from None
                 time.sleep(_POLL_INTERVAL)
