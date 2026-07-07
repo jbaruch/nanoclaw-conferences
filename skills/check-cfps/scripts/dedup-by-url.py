@@ -394,6 +394,24 @@ def lookup(state: dict, candidate_urls: list[str]) -> dict[str, str | None]:
     return result
 
 
+def _load_state(state_path: Path) -> tuple[dict | None, int]:
+    """Read + shape-validate cfp-state.json. Returns (state, 0) on
+    success or (None, exit_code) after writing the stderr diagnostic."""
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        sys.stderr.write(
+            f"dedup-by-url: failed to read {state_path}: {type(exc).__name__}: {exc}\n"
+        )
+        return None, 1
+    if not isinstance(state, dict):
+        sys.stderr.write(
+            f"dedup-by-url: {state_path} root is {type(state).__name__}, expected dict; aborting\n"
+        )
+        return None, 1
+    return state, 0
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         description=(
@@ -445,27 +463,22 @@ def main(argv: list[str]) -> int:
             )
         return 0
 
+    if args.lookup:
+        # Read-only mode: no lock. os.replace already guarantees a
+        # complete snapshot, and taking the exclusive lock here would
+        # let an unrelated writer block (or time out) a pure lookup.
+        state, err = _load_state(args.state_path)
+        if state is None:
+            return err
+        candidate_urls = [line for line in (raw.strip() for raw in sys.stdin) if line]
+        print(json.dumps(lookup(state, candidate_urls)))
+        return 0
+
     try:
         with state_lock.locked(args.state_path):
-            try:
-                state = json.loads(args.state_path.read_text(encoding="utf-8"))
-            except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-                sys.stderr.write(
-                    f"dedup-by-url: failed to read {args.state_path}: {type(exc).__name__}: {exc}\n"
-                )
-                return 1
-
-            if not isinstance(state, dict):
-                sys.stderr.write(
-                    f"dedup-by-url: {args.state_path} root is "
-                    f"{type(state).__name__}, expected dict; aborting\n"
-                )
-                return 1
-
-            if args.lookup:
-                candidate_urls = [line for line in (raw.strip() for raw in sys.stdin) if line]
-                print(json.dumps(lookup(state, candidate_urls)))
-                return 0
+            state, err = _load_state(args.state_path)
+            if state is None:
+                return err
 
             result = dedup(state)
 
@@ -481,7 +494,7 @@ def main(argv: list[str]) -> int:
 
             print(json.dumps(result))
             return 0
-    except state_lock.LockTimeout as exc:
+    except state_lock.LockError as exc:
         sys.stderr.write(f"dedup-by-url: {exc}\n")
         return 1
 

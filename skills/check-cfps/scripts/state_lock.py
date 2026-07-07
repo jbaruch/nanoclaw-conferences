@@ -23,11 +23,16 @@ the race the lock exists to close.
 
 Acquisition blocks up to `timeout` seconds (default DEFAULT_TIMEOUT,
 overridable per-call or via the CFP_STATE_LOCK_TIMEOUT env var), then
-raises LockTimeout. Callers translate LockTimeout into their script's
-exit-1 stderr diagnostic contract.
+raises LockTimeout. A lock file that cannot be created (missing state
+directory, non-writable filesystem) raises LockError with an actionable
+message. LockTimeout subclasses LockError, so callers catch LockError
+once and translate it into their script's exit-1 stderr diagnostic
+contract — no lock failure ever escapes as a traceback.
 
 Not a standalone script: importable module only, no entry point. Writer
-scripts sys.path-insert their own directory and `import state_lock`.
+scripts load it from the sibling file via importlib
+(`spec_from_file_location`), the same pattern backfill-name.py uses for
+its dedup-by-url helpers.
 """
 
 import fcntl
@@ -41,7 +46,12 @@ _POLL_INTERVAL = 0.05
 LOCK_SUFFIX = ".lock"
 
 
-class LockTimeout(Exception):
+class LockError(Exception):
+    """Raised when the state lock cannot be obtained — creation failure
+    or timeout. Catch this to honor the exit-1 diagnostic contract."""
+
+
+class LockTimeout(LockError):
     """Raised when the state lock cannot be acquired within the timeout."""
 
 
@@ -62,9 +72,17 @@ def locked(state_path: Path, timeout: float | None = None):
 
     Blocks up to `timeout` seconds (None → CFP_STATE_LOCK_TIMEOUT env var
     or DEFAULT_TIMEOUT), polling a non-blocking flock. Raises LockTimeout
-    on expiry; propagates OSError if the lock file cannot be created."""
+    on expiry and LockError when the lock file cannot be created, so
+    callers handle every lock failure through one except clause."""
     deadline = time.monotonic() + _effective_timeout(timeout)
-    fd = os.open(lock_path_for(state_path), os.O_CREAT | os.O_RDWR, 0o644)
+    try:
+        fd = os.open(lock_path_for(state_path), os.O_CREAT | os.O_RDWR, 0o644)
+    except OSError as exc:
+        raise LockError(
+            f"cannot create lock file {lock_path_for(state_path)}: "
+            f"{type(exc).__name__}: {exc} — check that the state directory "
+            f"exists and is writable, then rerun"
+        ) from exc
     try:
         while True:
             try:

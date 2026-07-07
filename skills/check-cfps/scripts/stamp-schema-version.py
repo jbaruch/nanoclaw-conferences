@@ -139,7 +139,7 @@ def main(argv=None):
                     return 1
             print(json.dumps({"total": total, "stamped": stamped}))
             return 0
-    except state_lock.LockTimeout as exc:
+    except state_lock.LockError as exc:
         sys.stderr.write(f"stamp-schema-version: {exc}\n")
         return 1
 

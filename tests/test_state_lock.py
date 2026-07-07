@@ -62,6 +62,21 @@ def test_contention_raises_lock_timeout(state_lock, tmp_path):
     assert str(state_lock.lock_path_for(state_path)) in str(excinfo.value)
 
 
+def test_unwritable_lock_location_raises_lock_error(state_lock, tmp_path):
+    """A lock file that cannot be created (here: missing parent
+    directory) raises LockError with an actionable message instead of
+    letting the raw OSError escape as a traceback. LockTimeout
+    subclasses LockError, so callers' single except clause covers both."""
+    state_path = tmp_path / "no-such-dir" / "cfp-state.json"
+
+    with pytest.raises(state_lock.LockError) as excinfo:
+        with state_lock.locked(state_path):
+            pass
+    assert "cannot create lock file" in str(excinfo.value)
+    assert "state directory" in str(excinfo.value)
+    assert issubclass(state_lock.LockTimeout, state_lock.LockError)
+
+
 def test_env_timeout_override_respected(state_lock, tmp_path, monkeypatch):
     """timeout=None defers to CFP_STATE_LOCK_TIMEOUT. With the env set
     to "0" a contended acquire fails fast instead of blocking for the

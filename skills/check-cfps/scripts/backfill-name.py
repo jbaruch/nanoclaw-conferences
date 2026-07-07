@@ -229,7 +229,7 @@ def main(argv: list[str]) -> int:
                 )
             )
             return 0
-    except state_lock.LockTimeout as exc:
+    except state_lock.LockError as exc:
         sys.stderr.write(f"backfill-name: {exc}\n")
         return 1
 

@@ -235,7 +235,7 @@ def main(argv=None):
                     f"stamp-last-checked: cannot write {args.state}: {type(exc).__name__}: {exc}\n"
                 )
                 return 1
-    except state_lock.LockTimeout as exc:
+    except state_lock.LockError as exc:
         sys.stderr.write(f"stamp-last-checked: {exc}\n")
         return 1
 
