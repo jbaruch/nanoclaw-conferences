@@ -2,6 +2,13 @@
 
 All notable changes to this tile are documented here.
 
+## 0.1.17 — 2026-07-07
+
+### Fixed
+
+- developers.events epoch-millisecond fields (`untilDate`, `conf.date`) now convert to dates in explicit UTC (jbaruch/nanoclaw-conferences#36). The previous naive `date.fromtimestamp` used the host timezone, shifting deadlines and conference dates by a day on non-UTC runners — affecting `days_left`, remind windows, sorting, travel-conflict checks, and expiry. The test fixture that masked this (a UTC-forcing `fromtimestamp` monkeypatch) is gone; a regression test now runs the real conversion under a UTC+14 host zone.
+- `make_slug` no longer keys yearless conference names under the current calendar year (jbaruch/nanoclaw-conferences#33). Fallback year priority is now: year embedded in the name → `conf_date` year → `deadline` year → current year, so a recurring conference whose feed name omits the year keys under its own edition's year and keeps matching its cfp-state row across year boundaries.
+
 ## 0.1.16 — 2026-07-07
 
 ### Fixed

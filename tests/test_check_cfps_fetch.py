@@ -22,14 +22,18 @@ Locks down the documented contract per `coding-policy: testing-standards`:
     exists but cannot be read or parsed, so terminal-state filtering
     is never silently skipped
 
-Tests freeze `module.date` (today() AND timezone-deterministic
-fromtimestamp()) and `module.datetime` (now()) so days_left math,
-checked_at, and the source-A `until_ms > now_ms` pre-filter are
-deterministic. `urllib.request.urlopen` is patched per-test to feed
-canned source bodies or raise unreachability errors.
+Tests freeze `module.date` (today()) and `module.datetime` (now()) so
+days_left math, checked_at, and the source-A `until_ms > now_ms`
+pre-filter are deterministic. Epoch→date conversion is NOT masked in
+the fixtures — the script converts with an explicit tz=timezone.utc,
+and a dedicated regression test runs it under a non-UTC host zone.
+`urllib.request.urlopen` is patched per-test to feed canned source
+bodies or raise unreachability errors.
 """
 
 import json
+import os
+import time
 from datetime import date, datetime, timedelta, timezone
 
 import pytest
@@ -42,18 +46,14 @@ _JAVA_CONFS_URL = "https://javaconferences.org/conferences.json"
 
 
 def _make_frozen_date(real_date):
+    # No fromtimestamp override here: production code converts epoch
+    # timestamps with an explicit tz=timezone.utc, so tests exercise the
+    # real conversion path on any runner timezone. Masking it in the
+    # fixture is what let a host-TZ-dependent conversion ship (#36).
     class FrozenDate(real_date):
         @classmethod
         def today(cls):
             return _FROZEN_TODAY
-
-        @classmethod
-        def fromtimestamp(cls, ts):
-            # UTC-deterministic so source-A `until_ms` → deadline
-            # arithmetic gives the same result on any CI runner
-            # timezone, instead of leaking the host's local TZ into
-            # the test outcome.
-            return datetime.fromtimestamp(ts, tz=timezone.utc).date()
 
     return FrozenDate
 
@@ -72,7 +72,7 @@ def _make_frozen_datetime(real_datetime):
 def _ms(d: date, hour: int = 12) -> int:
     """Convert a date to milliseconds since epoch at the given UTC hour.
     Noon UTC keeps the value safely inside the target day under the
-    UTC-deterministic fromtimestamp override above."""
+    script's explicit-UTC epoch conversion."""
     return int(datetime(d.year, d.month, d.day, hour, tzinfo=timezone.utc).timestamp() * 1000)
 
 
@@ -514,3 +514,108 @@ def test_slug_includes_year_for_state_lookup(check_cfps_fetch, monkeypatch, caps
     _, out, _ = _run(module, monkeypatch, capsys)
     cfps = json.loads(out)["cfps"]
     assert cfps[0]["slug"] == "pyconf-2026"
+
+
+def test_yearless_name_slug_year_from_conf_date(check_cfps_fetch, monkeypatch, capsys):
+    """A feed name without a year keys under the conference's own year,
+    not the wall clock: a next-January conference fetched in the prior
+    calendar year must not get this year's slug (it would miss its
+    existing cfp-state row and dodge sent/dismissed filtering)."""
+    module, _, _ = check_cfps_fetch
+    src_b = [
+        _src_b_entry(
+            "Devoxx Atlantis",
+            (_FROZEN_TODAY + timedelta(days=30)).isoformat(),
+            conf_date_iso="2027-01-20",
+        )
+    ]
+    _patch_urlopen(monkeypatch, source_a=[], source_b=src_b)
+
+    _, out, _ = _run(module, monkeypatch, capsys)
+    cfps = json.loads(out)["cfps"]
+    assert cfps[0]["slug"] == "devoxx-atlantis-2027"
+
+
+def test_yearless_name_slug_year_from_deadline_when_no_conf_date(
+    check_cfps_fetch, monkeypatch, capsys
+):
+    """Without a conf_date, the deadline year beats the current year:
+    a CFP closing next January keys under next year, not under
+    today's calendar year."""
+    module, _, _ = check_cfps_fetch
+    src_b = [_src_b_entry("Winter Summit", "2027-01-10")]
+    _patch_urlopen(monkeypatch, source_a=[], source_b=src_b)
+
+    _, out, _ = _run(module, monkeypatch, capsys)
+    cfps = json.loads(out)["cfps"]
+    assert cfps[0]["slug"] == "winter-summit-2027"
+
+
+def test_embedded_name_year_beats_conf_date_year(check_cfps_fetch, monkeypatch, capsys):
+    """A year embedded in the feed name wins over conf_date — the name
+    is the feed's own statement of which edition this is."""
+    module, _, _ = check_cfps_fetch
+    src_b = [
+        _src_b_entry(
+            "PyConf 2026",
+            (_FROZEN_TODAY + timedelta(days=15)).isoformat(),
+            conf_date_iso="2027-02-01",
+        )
+    ]
+    _patch_urlopen(monkeypatch, source_a=[], source_b=src_b)
+
+    _, out, _ = _run(module, monkeypatch, capsys)
+    cfps = json.loads(out)["cfps"]
+    assert cfps[0]["slug"] == "pyconf-2026"
+
+
+def test_mid_name_year_not_duplicated_in_slug(check_cfps_fetch, monkeypatch, capsys):
+    """A year in the middle of the name is used as the slug year and
+    removed from the base — not left in place to be duplicated
+    ("kubecon-2026-eu-2026")."""
+    module, _, _ = check_cfps_fetch
+    src_b = [_src_b_entry("KubeCon 2026 EU", (_FROZEN_TODAY + timedelta(days=15)).isoformat())]
+    _patch_urlopen(monkeypatch, source_a=[], source_b=src_b)
+
+    _, out, _ = _run(module, monkeypatch, capsys)
+    cfps = json.loads(out)["cfps"]
+    assert cfps[0]["slug"] == "kubecon-eu-2026"
+
+
+@pytest.mark.skipif(
+    not hasattr(time, "tzset"),
+    reason="time.tzset() unavailable on this platform (Windows) — cannot shift the host TZ",
+)
+def test_source_a_epoch_conversion_is_utc(check_cfps_fetch, monkeypatch, capsys):
+    """Source-A epoch-ms fields must convert in UTC regardless of the
+    host timezone. A deadline at 23:00 UTC is already 'tomorrow' in
+    UTC+14 — a naive fromtimestamp would shift both `deadline` and
+    `conf_date` a day late there. No fixture masking: this exercises
+    the script's real conversion under a shifted TZ."""
+    module, _, _ = check_cfps_fetch
+    deadline_day = _FROZEN_TODAY + timedelta(days=15)
+    conf_day = _FROZEN_TODAY + timedelta(days=40)
+    entry = _src_a_entry("TzConf 2026", deadline_day, conf_dates=[_ms(conf_day, hour=23)])
+    entry["untilDate"] = _ms(deadline_day, hour=23)
+    _patch_urlopen(monkeypatch, source_a=[entry], source_b=[])
+
+    old_tz = os.environ.get("TZ")
+    # POSIX TZ string, not a zoneinfo name: "GMT-14" means UTC+14 (POSIX
+    # inverts the sign) and needs no tzdata entry, so the shift works on
+    # minimal images too.
+    os.environ["TZ"] = "GMT-14"
+    time.tzset()
+    try:
+        # Prove the shift took effect — a no-op tzset would leave the
+        # process on UTC and make this regression test vacuous.
+        assert time.timezone == -14 * 3600, "TZ shift did not take effect"
+        _, out, _ = _run(module, monkeypatch, capsys)
+        cfps = json.loads(out)["cfps"]
+        assert cfps[0]["deadline"] == deadline_day.isoformat()
+        assert cfps[0]["conf_date"] == conf_day.isoformat()
+    finally:
+        if old_tz is None:
+            os.environ.pop("TZ", None)
+        else:
+            os.environ["TZ"] = old_tz
+        time.tzset()
