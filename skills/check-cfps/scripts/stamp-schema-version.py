@@ -104,7 +104,14 @@ def main(argv=None):
 
     total, stamped = stamp(state)
     if stamped:
-        _atomic_write_json(args.state, state)
+        try:
+            _atomic_write_json(args.state, state)
+        except OSError as exc:
+            sys.stderr.write(
+                f"stamp-schema-version: cannot write {args.state}: "
+                f"{type(exc).__name__}: {exc}\n"
+            )
+            return 1
     print(json.dumps({"total": total, "stamped": stamped}))
     return 0
 

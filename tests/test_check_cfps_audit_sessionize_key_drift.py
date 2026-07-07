@@ -48,6 +48,19 @@ def test_corrupt_json_exits_1(audit_sessionize_key_drift, tmp_path, capsys):
     assert "failed to read" in captured.err
 
 
+def test_invalid_utf8_exits_1(audit_sessionize_key_drift, tmp_path, capsys):
+    """A state file that is not valid UTF-8 gets the same exit-1 stderr
+    diagnostic as malformed JSON, not an unhandled UnicodeDecodeError."""
+    state_path = tmp_path / "cfp-state.json"
+    state_path.write_bytes(b"\xff\xfe{}")
+
+    rc = audit_sessionize_key_drift.main(["--state-path", str(state_path)])
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "failed to read" in captured.err
+
+
 def test_root_not_dict_exits_1(audit_sessionize_key_drift, tmp_path, capsys):
     state_path = tmp_path / "cfp-state.json"
     state_path.write_text(json.dumps([]), encoding="utf-8")

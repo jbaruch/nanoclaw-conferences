@@ -168,5 +168,39 @@ def test_non_dict_root_exits_1(stamp_schema_version, tmp_path, capsys):
     assert "expected a JSON object" in captured.err
 
 
+def test_invalid_utf8_exits_1(stamp_schema_version, tmp_path, capsys):
+    """A state file that is not valid UTF-8 gets the same exit-1 stderr
+    diagnostic as malformed JSON, not an unhandled UnicodeDecodeError."""
+    state_path = tmp_path / "cfp-state.json"
+    state_path.write_bytes(b"\xff\xfe{}")
+
+    rc = stamp_schema_version.main(["--state", str(state_path)])
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "cannot read" in captured.err
+
+
+def test_write_failure_exits_1(stamp_schema_version, tmp_path, capsys):
+    """When stamping needs a rewrite but the directory is not writable,
+    the script emits the documented stderr diagnostic and exits 1 instead
+    of escaping with an OSError traceback."""
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    state_path = state_dir / "cfp-state.json"
+    state_path.write_text(json.dumps({"conf-2026": {"status": "open"}}), encoding="utf-8")
+
+    state_dir.chmod(0o500)
+    try:
+        rc = stamp_schema_version.main(["--state", str(state_path)])
+        captured = capsys.readouterr()
+
+        assert rc == 1
+        assert "cannot write" in captured.err
+        assert str(state_path) in captured.err
+    finally:
+        state_dir.chmod(0o700)
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
