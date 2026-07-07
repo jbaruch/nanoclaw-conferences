@@ -181,25 +181,26 @@ def test_invalid_utf8_exits_1(stamp_schema_version, tmp_path, capsys):
     assert "cannot read" in captured.err
 
 
-def test_write_failure_exits_1(stamp_schema_version, tmp_path, capsys):
-    """When stamping needs a rewrite but the directory is not writable,
-    the script emits the documented stderr diagnostic and exits 1 instead
-    of escaping with an OSError traceback."""
-    state_dir = tmp_path / "state"
-    state_dir.mkdir()
-    state_path = state_dir / "cfp-state.json"
+def test_write_failure_exits_1(stamp_schema_version, tmp_path, capsys, monkeypatch):
+    """When stamping needs a rewrite but the write fails, the script emits
+    the documented stderr diagnostic and exits 1 instead of escaping with
+    an OSError traceback. The failure is injected by monkeypatching the
+    writer — directory-permission tricks are execution-identity dependent
+    (root ignores permission bits), so they cannot fail deterministically."""
+    state_path = tmp_path / "cfp-state.json"
     state_path.write_text(json.dumps({"conf-2026": {"status": "open"}}), encoding="utf-8")
 
-    state_dir.chmod(0o500)
-    try:
-        rc = stamp_schema_version.main(["--state", str(state_path)])
-        captured = capsys.readouterr()
+    def _boom(path, payload):
+        raise OSError("boom")
 
-        assert rc == 1
-        assert "cannot write" in captured.err
-        assert str(state_path) in captured.err
-    finally:
-        state_dir.chmod(0o700)
+    monkeypatch.setattr(stamp_schema_version, "_atomic_write_json", _boom)
+
+    rc = stamp_schema_version.main(["--state", str(state_path)])
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "cannot write" in captured.err
+    assert str(state_path) in captured.err
 
 
 if __name__ == "__main__":

@@ -323,14 +323,16 @@ def has_travel_conflict(cfp: dict, trips: list) -> bool:
 
 
 def load_cfp_state() -> dict:
-    """Absent file = first run = empty state. An existing file that cannot
-    be read or parsed is a hard failure: failing open with `{}` would drop
-    the sent/dismissed/remind filtering and resurface already-actioned CFPs
-    as new candidates."""
-    if not STATE_PATH.exists():
-        return {}
+    """Absent file = first run = empty state. Anything else that keeps the
+    state from being read or parsed is a hard failure: failing open with
+    `{}` would drop the sent/dismissed/remind filtering and resurface
+    already-actioned CFPs as new candidates. Only FileNotFoundError means
+    "first run" — an exists() pre-check would return False on e.g. a
+    permission error and silently take the empty-state path."""
     try:
         return json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        return {}
     except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:
         sys.stderr.write(
             f"check-cfps-fetch: cannot read {STATE_PATH}: "
