@@ -183,7 +183,13 @@ Then apply priority rules (earlier wins):
    python3 /home/node/.claude/skills/tessl__check-cfps/scripts/stamp-last-checked.py
    ```
 
-   It is **evidence-gated** (jbaruch/nanoclaw-conferences#8): it advances `_last_checked` only when the `verify-sessionize.py` driver left a `verify-evidence.json` marker for this run showing ≥1 entry resolved from a live response (or there was nothing to verify). Output on a clean stamp: `{"_last_checked": "<iso>", "verification": "live"|"none-required"}`, exit 0. If verification did not happen (driver skipped, or a total Sessionize outage), it does NOT advance the heartbeat — it writes `_last_checked_skipped` and **exits 3**: treat that exit like a stamp failure (do NOT proceed to clear the checkpoint in item 12; report a skipped-verification run). Exit 1 means the state file is missing/unreadable — surface it. Freshness lives here, not in per-record `updated`.
+   It is **evidence-gated** (jbaruch/nanoclaw-conferences#8): it advances `_last_checked` only when the `verify-sessionize.py` driver left a `verify-evidence.json` marker for this run showing ≥1 entry resolved from a live response (or there was nothing to verify). Output on a clean stamp: `{"_last_checked": "<iso>", "verification": "live"|"none-required"}`, exit 0. If verification did not happen (driver skipped, or a total Sessionize outage), it does NOT advance the heartbeat — it writes `_last_checked_skipped` and **exits 3**: treat that exit like a stamp failure (do NOT proceed to clear the checkpoint in item 12; report a skipped-verification run). On exit 3, ALSO invalidate the verification stages so a same-day retry re-runs Step 5 live instead of resuming the failed evidence (jbaruch/nanoclaw-conferences#31):
+
+   ```bash
+   python3 /home/node/.claude/skills/tessl__check-cfps/scripts/run-state.py invalidate verify working_set verify-evidence
+   ```
+
+   Earlier stages (`fetch`, `candidates`) stay checkpointed — only the failed verification and everything downstream of it re-runs. Exit 1 means the state file is missing/unreadable — surface it. Freshness lives here, not in per-record `updated`.
 
 12. The run completed successfully — clear the resume checkpoint store so the next run starts fresh:
 

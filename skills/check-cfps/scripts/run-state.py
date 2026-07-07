@@ -33,6 +33,13 @@ Subcommands:
                  no artifact was saved for that stage.
   done           Remove the run directory (success teardown). Emit
                  {"cleared": true}.
+  invalidate <stage>...
+                 Remove the named stages' artifacts and drop them from
+                 manifest.completed, so a same-day resume re-runs those
+                 steps instead of reloading failed output. Also accepts
+                 non-manifest markers in the run dir (verify-evidence).
+                 Idempotent — absent stages are reported, not errors.
+                 Emit {"invalidated": [...], "absent": [...]}.
 
 Resume is best-effort, not a correctness requirement: stages are
 idempotent and Step 5 re-verifies the full cohort, so a fresh full run is
@@ -204,6 +211,39 @@ def cmd_load(run_dir: Path, stage: str) -> int:
     return 0
 
 
+def cmd_invalidate(run_dir: Path, stages: list) -> int:
+    """Remove the named stages so a same-day resume re-runs them. Used on
+    verification-gate failure (stamp-last-checked exit 3): keeping `verify`
+    and `working_set` checkpointed would let the retry reload the same
+    failed evidence and repeat the refusal without a new Sessionize call
+    (jbaruch/nanoclaw-conferences#31)."""
+    for stage in stages:
+        if not STAGE_RE.match(stage):
+            sys.stderr.write(f"run-state: invalid stage name {stage!r}\n")
+            return 1
+
+    invalidated = []
+    absent = []
+    for stage in stages:
+        try:
+            (run_dir / f"{stage}.json").unlink()
+            invalidated.append(stage)
+        except FileNotFoundError:
+            absent.append(stage)
+
+    manifest = _read_manifest(run_dir)
+    if manifest is not None:
+        completed = manifest.get("completed")
+        if isinstance(completed, list):
+            remaining = [s for s in completed if s not in stages]
+            if remaining != completed:
+                manifest["completed"] = remaining
+                _atomic_write_json(run_dir / MANIFEST_NAME, manifest)
+
+    print(json.dumps({"invalidated": invalidated, "absent": absent}))
+    return 0
+
+
 def cmd_done(run_dir: Path) -> int:
     _clear_dir(run_dir)
     if run_dir.exists():
@@ -228,6 +268,8 @@ def main(argv=None) -> int:
     p_load = sub.add_parser("load", help="print a saved stage artifact")
     p_load.add_argument("stage")
     sub.add_parser("done", help="clear the run directory on success")
+    p_inv = sub.add_parser("invalidate", help="remove stages so a resume re-runs them")
+    p_inv.add_argument("stages", nargs="+")
     args = parser.parse_args(argv)
 
     run_dir = _run_dir()
@@ -242,6 +284,8 @@ def main(argv=None) -> int:
             return cmd_save(run_dir, args.stage)
         if args.command == "load":
             return cmd_load(run_dir, args.stage)
+        if args.command == "invalidate":
+            return cmd_invalidate(run_dir, args.stages)
         # `done` — the only remaining branch under a required subparser.
         return cmd_done(run_dir)
     except OSError as exc:
