@@ -36,7 +36,9 @@ Subcommands:
   invalidate <stage>...
                  Remove the named stages' artifacts and drop them from
                  manifest.completed, so a same-day resume re-runs those
-                 steps instead of reloading failed output. Also accepts
+                 steps instead of reloading failed output. Cascades: every
+                 stage completed after the earliest named one is dropped
+                 too (later stages derive from earlier ones). Also accepts
                  non-manifest markers in the run dir (verify-evidence).
                  Idempotent — absent stages are reported, not errors.
                  Emit {"invalidated": [...], "absent": [...]}.
@@ -216,29 +218,43 @@ def cmd_invalidate(run_dir: Path, stages: list) -> int:
     verification-gate failure (stamp-last-checked exit 3): keeping `verify`
     and `working_set` checkpointed would let the retry reload the same
     failed evidence and repeat the refusal without a new Sessionize call
-    (jbaruch/nanoclaw-conferences#31)."""
+    (jbaruch/nanoclaw-conferences#31).
+
+    Cascades downstream: `completed` is completion-ordered and later stages
+    derive from earlier ones, so everything after the earliest named stage
+    is invalidated too — resume means "start at the first stage NOT in
+    completed", and a non-prefix removal would let a stale downstream
+    artifact be treated as current. The manifest rewrite happens BEFORE any
+    unlink: a failed rewrite aborts with the artifacts intact, and a failed
+    unlink afterwards leaves only an orphan file no longer listed in
+    `completed` (harmless — `save` overwrites, `begin`'s reset clears)."""
     for stage in stages:
         if not STAGE_RE.match(stage):
             sys.stderr.write(f"run-state: invalid stage name {stage!r}\n")
             return 1
 
+    targets = list(dict.fromkeys(stages))
+    manifest = _read_manifest(run_dir)
+    if manifest is not None:
+        completed = manifest.get("completed")
+        if isinstance(completed, list):
+            named_indexes = [i for i, s in enumerate(completed) if s in set(targets)]
+            if named_indexes:
+                cut = min(named_indexes)
+                for cascaded in completed[cut:]:
+                    if cascaded not in targets:
+                        targets.append(cascaded)
+                manifest["completed"] = completed[:cut]
+                _atomic_write_json(run_dir / MANIFEST_NAME, manifest)
+
     invalidated = []
     absent = []
-    for stage in stages:
+    for stage in targets:
         try:
             (run_dir / f"{stage}.json").unlink()
             invalidated.append(stage)
         except FileNotFoundError:
             absent.append(stage)
-
-    manifest = _read_manifest(run_dir)
-    if manifest is not None:
-        completed = manifest.get("completed")
-        if isinstance(completed, list):
-            remaining = [s for s in completed if s not in stages]
-            if remaining != completed:
-                manifest["completed"] = remaining
-                _atomic_write_json(run_dir / MANIFEST_NAME, manifest)
 
     print(json.dumps({"invalidated": invalidated, "absent": absent}))
     return 0

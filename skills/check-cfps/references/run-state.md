@@ -72,7 +72,9 @@ python3 .../run-state.py load verify          # prints the artifact; exit 2 if n
 python3 .../run-state.py done                 # -> {"cleared": true}
 
 # Drop failed stages (and the driver's evidence marker) so a same-day
-# retry re-runs them instead of reloading failed output. Idempotent —
+# retry re-runs them instead of reloading failed output. Cascades to every
+# stage completed after the earliest named one (later stages derive from
+# earlier ones), so `completed` always stays a resumable prefix. Idempotent —
 # a stage with no artifact on disk is reported under "absent".
 python3 .../run-state.py invalidate verify working_set verify-evidence
 # -> {"invalidated": ["verify", "working_set", "verify-evidence"], "absent": []}

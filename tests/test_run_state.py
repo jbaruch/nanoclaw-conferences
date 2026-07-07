@@ -274,6 +274,53 @@ def test_invalidate_absent_stage_is_idempotent(run_state, monkeypatch, capsys):
     assert _out(capsys) == {"invalidated": [], "absent": ["verify", "working_set"]}
 
 
+def test_invalidate_cascades_to_downstream_stages(run_state, monkeypatch, capsys):
+    """Invalidating a mid-pipeline stage drops everything completed after
+    it too: `completed` is completion-ordered, later stages derive from
+    earlier ones, and resume treats `completed` as a prefix — a hole in
+    the middle would let a stale downstream artifact pass as current."""
+    module, run_dir = run_state
+    module.main(["begin"])
+    capsys.readouterr()
+    for stage in ("fetch", "candidates", "verify", "working_set"):
+        _stdin(monkeypatch, {"stage": stage})
+        module.main(["save", stage])
+        capsys.readouterr()
+
+    rc = module.main(["invalidate", "candidates"])
+    assert rc == 0
+    assert _out(capsys) == {
+        "invalidated": ["candidates", "verify", "working_set"],
+        "absent": [],
+    }
+    assert _manifest(run_dir)["completed"] == ["fetch"]
+    assert (run_dir / "fetch.json").exists()
+    assert not (run_dir / "verify.json").exists()
+
+
+def test_invalidate_manifest_write_failure_keeps_artifacts(run_state, monkeypatch, capsys):
+    """The manifest rewrite happens before any unlink — if it fails, the
+    command exits 1 with the artifacts intact, never a manifest that
+    lists stages whose files are already gone."""
+    module, run_dir = run_state
+    module.main(["begin"])
+    capsys.readouterr()
+    _stdin(monkeypatch, {"a": 1})
+    module.main(["save", "verify"])
+    capsys.readouterr()
+
+    def _boom(*_args, **_kwargs):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(module, "_atomic_write_json", _boom)
+    rc = module.main(["invalidate", "verify"])
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "invalidate failed" in captured.err
+    assert (run_dir / "verify.json").exists()
+
+
 def test_invalidate_covers_non_manifest_markers(run_state, capsys):
     """`verify-evidence.json` is written by the Step 5 driver, not via
     `save`, so it never appears in manifest.completed — invalidate still
