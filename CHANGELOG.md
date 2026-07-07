@@ -2,6 +2,12 @@
 
 All notable changes to this tile are documented here.
 
+## 0.1.14 — 2026-07-07
+
+### Fixed
+
+- Non-Sessionize `open`/`approved` CFP entries now expire when their deadline passes (jbaruch/nanoclaw-conferences#27). Previously nothing ever re-checked a stored deadline-of-record row against its own deadline, so closed CFPs lingered as `open` forever — and each run refreshed their `last_verified`, so they never aged out either (33 zombie rows found in live state on 2026-07-07). New `scripts/expire-cfps.py` — the single writer of the new `expired` status — runs in Step 5 pre-verify: past-deadline non-Sessionize rows become `expired` (with a `bot_notes` marker) and drop out of the verify cohort. `user_actioned` rows are never touched; Sessionize rows (explicit or host-inferred) are left to the live-verify "MISSED" path; a CFP re-listed upstream with an extended deadline revives automatically since the fetcher's state filter does not hide `expired` slugs.
+
 ## 0.1.13 — 2026-07-07
 
 ### Fixed

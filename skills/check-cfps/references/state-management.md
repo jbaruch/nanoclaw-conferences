@@ -4,7 +4,9 @@ Referenced from `check-cfps` SKILL.md ("State Management"). Full schema lives at
 
 ## Status values
 
-`open`, `approved`, `dismissed`, `conflict`, `sent`, `remind`. User wording like "submitted to [conf]" normalizes to `status: sent`; `submitted` is not a distinct status.
+`open`, `approved`, `dismissed`, `conflict`, `sent`, `remind`, `expired`. User wording like "submitted to [conf]" normalizes to `status: sent`; `submitted` is not a distinct status.
+
+`expired` has a single writer: `scripts/expire-cfps.py` (check-cfps Step 5 pre-verify), which closes out stale non-Sessionize `open`/`approved` rows past their deadline-of-record (jbaruch/nanoclaw-conferences#27); Sessionize rows are instead dismissed by the live-verify "MISSED" path. Expiry overrides `shown_in_brief` stickiness (same basis as the Step 8 confirmed-closed exception) but never touches `user_actioned: true` rows. Revival: `expired` slugs are not hidden by the fetcher's state filter, so a CFP re-listed upstream with an extended deadline re-enters as a candidate and is rewritten from the fresh verdict.
 
 ## Slug format
 
