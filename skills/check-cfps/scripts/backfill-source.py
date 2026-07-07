@@ -199,20 +199,20 @@ def main(argv: list[str]) -> int:
                     )
                     return 1
 
-            print(
-                json.dumps(
-                    {
-                        "backfilled": backfilled,
-                        "skipped_existing_source": skipped_existing,
-                        "unsourced_remaining": unsourced_remaining,
-                        "by_source": dict(by_source),
-                    }
-                )
-            )
-            return 0
+            payload = {
+                "backfilled": backfilled,
+                "skipped_existing_source": skipped_existing,
+                "unsourced_remaining": unsourced_remaining,
+                "by_source": dict(by_source),
+            }
     except state_lock.LockError as exc:
         sys.stderr.write(f"backfill-source: {exc}\n")
         return 1
+
+    # Print after releasing the lock — a blocked stdout consumer must not
+    # extend the exclusive hold beyond the read-modify-write.
+    print(json.dumps(payload))
+    return 0
 
 
 if __name__ == "__main__":

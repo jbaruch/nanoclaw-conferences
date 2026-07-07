@@ -257,21 +257,21 @@ def main(argv: list[str]) -> int:
                     )
                     return 1
 
-            print(
-                json.dumps(
-                    {
-                        "expired": expired,
-                        "skipped_user_actioned": skipped_user_actioned,
-                        "skipped_sessionize": skipped_sessionize,
-                        "skipped_no_deadline": skipped_no_deadline,
-                        "expired_slugs": expired_slugs,
-                    }
-                )
-            )
-            return 0
+            payload = {
+                "expired": expired,
+                "skipped_user_actioned": skipped_user_actioned,
+                "skipped_sessionize": skipped_sessionize,
+                "skipped_no_deadline": skipped_no_deadline,
+                "expired_slugs": expired_slugs,
+            }
     except state_lock.LockError as exc:
         sys.stderr.write(f"expire-cfps: {exc}\n")
         return 1
+
+    # Print after releasing the lock — a blocked stdout consumer must not
+    # extend the exclusive hold beyond the read-modify-write.
+    print(json.dumps(payload))
+    return 0
 
 
 if __name__ == "__main__":

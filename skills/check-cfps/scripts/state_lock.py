@@ -62,22 +62,36 @@ def lock_path_for(state_path: Path) -> Path:
 def _effective_timeout(timeout):
     if timeout is not None:
         try:
-            return float(timeout)
+            value = float(timeout)
         except (TypeError, ValueError) as exc:
             raise LockError(
-                f"invalid lock timeout {timeout!r}: expected numeric seconds "
-                f"— fix the caller's timeout argument"
+                f"invalid lock timeout {timeout!r}: expected non-negative "
+                f"numeric seconds — fix the caller's timeout argument"
             ) from exc
+        if value < 0:
+            raise LockError(
+                f"invalid lock timeout {timeout!r}: expected non-negative "
+                f"numeric seconds — fix the caller's timeout argument"
+            )
+        return value
     env = os.environ.get("CFP_STATE_LOCK_TIMEOUT")
     if not env:
         return DEFAULT_TIMEOUT
     try:
-        return float(env)
+        value = float(env)
     except ValueError as exc:
         raise LockError(
-            f"invalid CFP_STATE_LOCK_TIMEOUT value {env!r}: expected numeric "
-            f"seconds (e.g. 30) — fix or unset the environment variable"
+            f"invalid CFP_STATE_LOCK_TIMEOUT value {env!r}: expected "
+            f"non-negative numeric seconds (e.g. 30) — fix or unset the "
+            f"environment variable"
         ) from exc
+    if value < 0:
+        raise LockError(
+            f"invalid CFP_STATE_LOCK_TIMEOUT value {env!r}: expected "
+            f"non-negative numeric seconds (e.g. 30) — fix or unset the "
+            f"environment variable"
+        )
+    return value
 
 
 @contextmanager

@@ -492,11 +492,15 @@ def main(argv: list[str]) -> int:
                     )
                     return 1
 
-            print(json.dumps(result))
-            return 0
+            payload = result
     except state_lock.LockError as exc:
         sys.stderr.write(f"dedup-by-url: {exc}\n")
         return 1
+
+    # Print after releasing the lock — a blocked stdout consumer must not
+    # extend the exclusive hold beyond the read-modify-write.
+    print(json.dumps(payload))
+    return 0
 
 
 if __name__ == "__main__":

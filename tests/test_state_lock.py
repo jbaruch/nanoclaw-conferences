@@ -101,6 +101,24 @@ def test_invalid_explicit_timeout_raises_lock_error(state_lock, tmp_path):
     assert "invalid lock timeout" in str(excinfo.value)
 
 
+def test_negative_timeout_raises_lock_error(state_lock, tmp_path, monkeypatch):
+    """Negative timeouts (explicit or via env) are configuration errors,
+    not an instant-timeout mode — they would produce nonsense diagnostics
+    like 'within -1s'."""
+    state_path = tmp_path / "cfp-state.json"
+
+    with pytest.raises(state_lock.LockError) as excinfo:
+        with state_lock.locked(state_path, timeout=-1):
+            pass
+    assert "non-negative" in str(excinfo.value)
+
+    monkeypatch.setenv("CFP_STATE_LOCK_TIMEOUT", "-5")
+    with pytest.raises(state_lock.LockError) as excinfo:
+        with state_lock.locked(state_path, timeout=None):
+            pass
+    assert "non-negative" in str(excinfo.value)
+
+
 def test_flock_unsupported_raises_lock_error(state_lock, tmp_path, monkeypatch):
     """A non-contention OSError from flock (e.g. the filesystem does not
     support it) surfaces as LockError with a repair hint, not a raw

@@ -216,22 +216,21 @@ def main(argv: list[str]) -> int:
                     )
                     return 1
 
-            print(
-                json.dumps(
-                    {
-                        "backfilled": backfilled,
-                        "skipped_named": skipped_named,
-                        "skipped_user_actioned": skipped_user_actioned,
-                        "unnamed_remaining": unnamed_remaining,
-                        "named": named,
-                    },
-                    ensure_ascii=False,
-                )
-            )
-            return 0
+            payload = {
+                "backfilled": backfilled,
+                "skipped_named": skipped_named,
+                "skipped_user_actioned": skipped_user_actioned,
+                "unnamed_remaining": unnamed_remaining,
+                "named": named,
+            }
     except state_lock.LockError as exc:
         sys.stderr.write(f"backfill-name: {exc}\n")
         return 1
+
+    # Print after releasing the lock — a blocked stdout consumer must not
+    # extend the exclusive hold beyond the read-modify-write.
+    print(json.dumps(payload, ensure_ascii=False))
+    return 0
 
 
 if __name__ == "__main__":

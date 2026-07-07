@@ -137,11 +137,15 @@ def main(argv=None):
                         f"{type(exc).__name__}: {exc}\n"
                     )
                     return 1
-            print(json.dumps({"total": total, "stamped": stamped}))
-            return 0
+            payload = {"total": total, "stamped": stamped}
     except state_lock.LockError as exc:
         sys.stderr.write(f"stamp-schema-version: {exc}\n")
         return 1
+
+    # Print after releasing the lock — a blocked stdout consumer must not
+    # extend the exclusive hold beyond the read-modify-write.
+    print(json.dumps(payload))
+    return 0
 
 
 if __name__ == "__main__":
