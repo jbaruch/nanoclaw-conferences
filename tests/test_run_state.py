@@ -298,6 +298,30 @@ def test_invalidate_cascades_to_downstream_stages(run_state, monkeypatch, capsys
     assert not (run_dir / "verify.json").exists()
 
 
+def test_invalidate_skips_invalid_cascaded_manifest_entries(run_state, monkeypatch, capsys):
+    """Cascaded names come from manifest.completed, which is data, not
+    trusted input — a tampered entry like "../escape" is skipped, never
+    joined into an unlink path outside run_dir."""
+    module, run_dir = run_state
+    module.main(["begin"])
+    capsys.readouterr()
+    _stdin(monkeypatch, {"a": 1})
+    module.main(["save", "verify"])
+    capsys.readouterr()
+
+    outside = run_dir.parent / "escape.json"
+    outside.write_text("{}", encoding="utf-8")
+    manifest = _manifest(run_dir)
+    manifest["completed"] = ["verify", "../escape"]
+    (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+
+    rc = module.main(["invalidate", "verify"])
+    assert rc == 0
+    assert _out(capsys) == {"invalidated": ["verify"], "absent": []}
+    assert outside.exists()
+    assert _manifest(run_dir)["completed"] == []
+
+
 def test_invalidate_manifest_write_failure_keeps_artifacts(run_state, monkeypatch, capsys):
     """The manifest rewrite happens before any unlink — if it fails, the
     command exits 1 with the artifacts intact, never a manifest that

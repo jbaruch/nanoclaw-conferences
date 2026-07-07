@@ -242,6 +242,11 @@ def cmd_invalidate(run_dir: Path, stages: list) -> int:
             if named_indexes:
                 cut = min(named_indexes)
                 for cascaded in completed[cut:]:
+                    # Manifest content is data, not trusted input — a
+                    # corrupt/tampered entry like "../escape" must not
+                    # reach the unlink below and traverse out of run_dir.
+                    if not isinstance(cascaded, str) or not STAGE_RE.match(cascaded):
+                        continue
                     if cascaded not in targets:
                         targets.append(cascaded)
                 manifest["completed"] = completed[:cut]
