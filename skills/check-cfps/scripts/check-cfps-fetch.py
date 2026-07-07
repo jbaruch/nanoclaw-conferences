@@ -75,12 +75,28 @@ TRAVEL_PATH = Path("/workspace/group/travel-schedule.json")
 # ---------------------------------------------------------------------------
 
 
-def make_slug(name: str) -> str:
-    """Normalize conference name to a slug including the year."""
+def make_slug(name: str, conf_date: str = "", deadline: str = "") -> str:
+    """Normalize conference name to a slug including the year.
+
+    Year priority: embedded in the name → `conf_date` year → `deadline`
+    year → current year. The wall clock is the last resort only: a
+    recurring conference whose feed name omits the year must key under
+    the year of its own dates, or it misses its existing cfp-state row
+    across year boundaries and dodges sent/dismissed/remind filtering."""
     lower = name.lower().strip()
     # Extract trailing year if present
     year_match = re.search(r"\b(20\d\d)\b", lower)
-    year = year_match.group(1) if year_match else str(date.today().year)
+    if year_match:
+        year = year_match.group(1)
+    else:
+        year = ""
+        for candidate in (conf_date, deadline):
+            parsed = parse_flexible_date(candidate)
+            if parsed:
+                year = str(parsed.year)
+                break
+        if not year:
+            year = str(date.today().year)
     # Remove trailing year from base (will re-append)
     base = re.sub(r"\s*20\d\d\s*$", "", lower).strip()
     slug_base = re.sub(r"[^a-z0-9]+", "-", base).strip("-")
@@ -114,7 +130,10 @@ def fetch_developers_events(warnings: list) -> list:
             if not until_ms or until_ms <= now_ms:
                 continue
 
-            deadline = date.fromtimestamp(until_ms / 1000)
+            # Feed timestamps are UTC epoch ms; convert in UTC explicitly.
+            # A naive fromtimestamp uses the host timezone and shifts
+            # deadlines by a day on non-UTC runners.
+            deadline = datetime.fromtimestamp(until_ms / 1000, tz=timezone.utc).date()
 
             conf = entry.get("conf", {})
             name = conf.get("name", "").strip()
@@ -129,7 +148,11 @@ def fetch_developers_events(warnings: list) -> list:
             conf_date = None
             if conf_dates:
                 try:
-                    conf_date = date.fromtimestamp(min(conf_dates) / 1000).isoformat()
+                    conf_date = (
+                        datetime.fromtimestamp(min(conf_dates) / 1000, tz=timezone.utc)
+                        .date()
+                        .isoformat()
+                    )
                 except (ValueError, OverflowError, OSError, TypeError) as exc:
                     # Narrow to fromtimestamp's real failure modes:
                     # ValueError for out-of-range, OverflowError for
@@ -418,7 +441,11 @@ def main():
 
     # Enrich with slug and days_left
     for cfp in all_cfps:
-        cfp["slug"] = make_slug(cfp["name"])
+        cfp["slug"] = make_slug(
+            cfp["name"],
+            conf_date=cfp.get("conf_date", ""),
+            deadline=cfp.get("deadline", ""),
+        )
         try:
             deadline = date.fromisoformat(cfp["deadline"])
             cfp["days_left"] = (deadline - today).days
