@@ -66,6 +66,14 @@ python3 /home/node/.claude/skills/tessl__check-cfps/scripts/backfill-name.py
 
 It guarantees a usable `name` on every record it can, touching nothing else and never touching `user_actioned: true` entries (immutability per `references/contracts.md`); the derivation rules are the script's contract (`scripts/backfill-name.py` docstring). Surface a non-zero `unnamed_remaining` or `skipped_user_actioned` in the run report. Abort on non-zero exit (state file unreadable).
 
+**Pre-verify: deadline expiry.** Then run the deterministic expiry pass — the single writer of `status: "expired"` (jbaruch/nanoclaw-conferences#27):
+
+```bash
+python3 /home/node/.claude/skills/tessl__check-cfps/scripts/expire-cfps.py
+```
+
+It expires stale non-Sessionize `open`/`approved` rows whose deadline has passed, so they leave the verify cohort below instead of being re-blessed every run; eligibility, guards, and the revival path are the script's contract (`scripts/expire-cfps.py` docstring). Include a non-zero `expired` count in the run report. Abort on non-zero exit (state file unreadable).
+
 Verify two cohorts:
 - **New candidates** from Steps 2–4.
 - **Already-stored `open`/`approved` entries** — every slug in `cfp-state.json` with `status in (open, approved)`.

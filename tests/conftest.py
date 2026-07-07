@@ -76,6 +76,21 @@ def backfill_name():
 
 
 @pytest.fixture
+def expire_cfps():
+    """Load check-cfps/scripts/expire-cfps.py.
+
+    Same CLI shape as `backfill_source`: `--state-path` arg, JSON to
+    stdout. Tests always pass `--today YYYY-MM-DD` so nothing depends
+    on the wall clock (the flag exists for exactly that reason). The
+    module reuses `infer_source` (backfill-source.py) and
+    `_atomic_write` (dedup-by-url.py) via sibling loads."""
+    return _load(
+        "expire_cfps_under_test",
+        "skills/check-cfps/scripts/expire-cfps.py",
+    )
+
+
+@pytest.fixture
 def stamp_schema_version():
     """Load check-cfps/scripts/stamp-schema-version.py.
 

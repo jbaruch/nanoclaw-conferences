@@ -71,6 +71,7 @@ The skill bundle includes deterministic scripts the agent invokes from the SKILL
 - `scripts/apply-sessionize-results.py` — joins batched Sessionize results back to entries and emits per-entry verdicts
 - `scripts/backfill-source.py` — infers a missing `source` from the `cfp_url` host
 - `scripts/backfill-name.py` — derives a fallback `name` for nameless records from the slug or `cfp_url`
+- `scripts/expire-cfps.py` — expires stale non-Sessionize `open`/`approved` entries whose deadline passed
 - `scripts/match-priorities.py` — deterministic priority-interest prefilter
 - `scripts/dedup-by-url.py` — collapses entries whose `cfp_url` normalises to the same host+path, preserving the highest-priority source attribution and inheriting missing metadata from dropped copies
 - `scripts/stamp-schema-version.py` — owner-side `schema_version` stamper for `cfp-state.json`
