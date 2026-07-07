@@ -330,7 +330,7 @@ def load_cfp_state() -> dict:
     "first run" — an exists() pre-check would return False on e.g. a
     permission error and silently take the empty-state path."""
     try:
-        return json.loads(STATE_PATH.read_text(encoding="utf-8"))
+        state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
     except FileNotFoundError:
         return {}
     except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:
@@ -341,6 +341,15 @@ def load_cfp_state() -> dict:
             f"repair the file and rerun\n"
         )
         sys.exit(1)
+    if not isinstance(state, dict):
+        sys.stderr.write(
+            f"check-cfps-fetch: {STATE_PATH} root is "
+            f"{type(state).__name__}, expected a JSON object — refusing to "
+            f"run without usable state (sent/dismissed/remind filtering "
+            f"would be lost); restore or repair the file and rerun\n"
+        )
+        sys.exit(1)
+    return state
 
 
 def apply_state_filter(cfp: dict, state: dict, today: date) -> bool:

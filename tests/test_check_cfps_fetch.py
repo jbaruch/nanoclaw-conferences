@@ -451,6 +451,23 @@ def test_corrupt_state_file_aborts(check_cfps_fetch, monkeypatch, capsys):
     assert out == ""
 
 
+def test_non_object_state_root_aborts(check_cfps_fetch, monkeypatch, capsys):
+    """Syntactically valid JSON with a non-object root (e.g. `[]`) is
+    invalid state — abort with a diagnostic, not an AttributeError
+    traceback later in apply_state_filter."""
+    module, state_path, _ = check_cfps_fetch
+    state_path.write_text("[]")
+
+    src_b = [_src_b_entry("StillShips 2026", (_FROZEN_TODAY + timedelta(days=12)).isoformat())]
+    _patch_urlopen(monkeypatch, source_a=[], source_b=src_b)
+
+    code, out, err = _run(module, monkeypatch, capsys)
+    assert code == 1
+    assert "expected a JSON object" in err
+    assert str(state_path) in err
+    assert out == ""
+
+
 def test_invalid_utf8_state_file_aborts(check_cfps_fetch, monkeypatch, capsys):
     """A state file that exists but is not valid UTF-8 → same hard failure
     as malformed JSON, not a traceback and not fail-open."""
