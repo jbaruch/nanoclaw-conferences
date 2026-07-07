@@ -29,7 +29,10 @@ Output JSON:
     "checked_at": "2026-03-29T05:00:00Z"
   }
 
-Exit code 0 always.
+Exit code 0 on success. Exit code 1 when cfp-state.json exists but cannot be
+read or parsed — the state filter (sent/dismissed/remind/blocked) must not be
+silently skipped, so an unreadable state file is a hard failure, never an
+empty state.
 """
 
 import json
@@ -319,15 +322,23 @@ def has_travel_conflict(cfp: dict, trips: list) -> bool:
     return False
 
 
-def load_cfp_state(warnings: list) -> dict:
+def load_cfp_state() -> dict:
+    """Absent file = first run = empty state. An existing file that cannot
+    be read or parsed is a hard failure: failing open with `{}` would drop
+    the sent/dismissed/remind filtering and resurface already-actioned CFPs
+    as new candidates."""
     if not STATE_PATH.exists():
         return {}
     try:
-        with open(STATE_PATH) as f:
-            return json.load(f)
-    except Exception as e:
-        warnings.append(f"Failed to load cfp-state.json: {e}")
-        return {}
+        return json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:
+        sys.stderr.write(
+            f"check-cfps-fetch: cannot read {STATE_PATH}: "
+            f"{type(e).__name__}: {e} — refusing to run without state "
+            f"(sent/dismissed/remind filtering would be lost); restore or "
+            f"repair the file and rerun\n"
+        )
+        sys.exit(1)
 
 
 def apply_state_filter(cfp: dict, state: dict, today: date) -> bool:
@@ -392,7 +403,7 @@ def main():
 
     # Load supporting data
     trips = load_travel_schedule(warnings)
-    state = load_cfp_state(warnings)
+    state = load_cfp_state()
 
     # Enrich with slug and days_left
     for cfp in all_cfps:
