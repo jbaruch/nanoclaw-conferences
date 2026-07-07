@@ -61,9 +61,23 @@ def lock_path_for(state_path: Path) -> Path:
 
 def _effective_timeout(timeout):
     if timeout is not None:
-        return float(timeout)
+        try:
+            return float(timeout)
+        except (TypeError, ValueError) as exc:
+            raise LockError(
+                f"invalid lock timeout {timeout!r}: expected numeric seconds "
+                f"— fix the caller's timeout argument"
+            ) from exc
     env = os.environ.get("CFP_STATE_LOCK_TIMEOUT")
-    return float(env) if env else DEFAULT_TIMEOUT
+    if not env:
+        return DEFAULT_TIMEOUT
+    try:
+        return float(env)
+    except ValueError as exc:
+        raise LockError(
+            f"invalid CFP_STATE_LOCK_TIMEOUT value {env!r}: expected numeric "
+            f"seconds (e.g. 30) — fix or unset the environment variable"
+        ) from exc
 
 
 @contextmanager
@@ -96,6 +110,14 @@ def locked(state_path: Path, timeout: float | None = None):
                         f"holds it; retry once it finishes"
                     ) from None
                 time.sleep(_POLL_INTERVAL)
+            except OSError as exc:
+                # e.g. flock unsupported on the underlying filesystem —
+                # contention is retried above, everything else is terminal.
+                raise LockError(
+                    f"cannot lock {lock_path_for(state_path)}: "
+                    f"{type(exc).__name__}: {exc} — the filesystem may not "
+                    f"support flock; move the state file to one that does"
+                ) from exc
         yield
     finally:
         os.close(fd)

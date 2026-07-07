@@ -77,6 +77,47 @@ def test_unwritable_lock_location_raises_lock_error(state_lock, tmp_path):
     assert issubclass(state_lock.LockTimeout, state_lock.LockError)
 
 
+def test_invalid_env_timeout_raises_lock_error(state_lock, tmp_path, monkeypatch):
+    """A non-numeric CFP_STATE_LOCK_TIMEOUT is an operator typo, not a
+    traceback: locked() raises LockError naming the bad value and the
+    expected format, before touching the lock file."""
+    monkeypatch.setenv("CFP_STATE_LOCK_TIMEOUT", "soon")
+    state_path = tmp_path / "cfp-state.json"
+
+    with pytest.raises(state_lock.LockError) as excinfo:
+        with state_lock.locked(state_path):
+            pass
+    assert "invalid CFP_STATE_LOCK_TIMEOUT" in str(excinfo.value)
+    assert "'soon'" in str(excinfo.value)
+    assert not state_lock.lock_path_for(state_path).exists()
+
+
+def test_invalid_explicit_timeout_raises_lock_error(state_lock, tmp_path):
+    state_path = tmp_path / "cfp-state.json"
+
+    with pytest.raises(state_lock.LockError) as excinfo:
+        with state_lock.locked(state_path, timeout="never"):
+            pass
+    assert "invalid lock timeout" in str(excinfo.value)
+
+
+def test_flock_unsupported_raises_lock_error(state_lock, tmp_path, monkeypatch):
+    """A non-contention OSError from flock (e.g. the filesystem does not
+    support it) surfaces as LockError with a repair hint, not a raw
+    traceback — only BlockingIOError means 'wait and retry'."""
+    state_path = tmp_path / "cfp-state.json"
+
+    def _unsupported(fd, op):
+        raise OSError(95, "Operation not supported")
+
+    monkeypatch.setattr(state_lock.fcntl, "flock", _unsupported)
+    with pytest.raises(state_lock.LockError) as excinfo:
+        with state_lock.locked(state_path):
+            pass
+    assert "cannot lock" in str(excinfo.value)
+    assert "flock" in str(excinfo.value)
+
+
 def test_env_timeout_override_respected(state_lock, tmp_path, monkeypatch):
     """timeout=None defers to CFP_STATE_LOCK_TIMEOUT. With the env set
     to "0" a contended acquire fails fast instead of blocking for the
