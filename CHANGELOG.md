@@ -2,6 +2,12 @@
 
 All notable changes to this tile are documented here.
 
+## 0.1.18 — 2026-07-07
+
+### Fixed
+
+- Failed verification checkpoints are now invalidated before a same-day retry (jbaruch/nanoclaw-conferences#31). When `stamp-last-checked.py` exits 3 (verification not evidenced), the run-state store used to keep the saved `verify`/`working_set` artifacts, so a same-day retry resumed straight to Step 8 and repeated the heartbeat refusal without a new Sessionize call. New `run-state.py invalidate <stage>...` subcommand removes named stage artifacts (plus the driver's `verify-evidence.json` marker) and drops them from `manifest.completed`; SKILL.md Step 8 item 11 now runs it on exit 3 so the retry keeps `fetch`/`candidates` but re-runs Step 5 live.
+
 ## 0.1.17 — 2026-07-07
 
 ### Fixed

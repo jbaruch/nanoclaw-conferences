@@ -70,6 +70,14 @@ python3 .../run-state.py load verify          # prints the artifact; exit 2 if n
 
 # Clear on success (end of Step 8, after the state write + stampers).
 python3 .../run-state.py done                 # -> {"cleared": true}
+
+# Drop failed stages (and the driver's evidence marker) so a same-day
+# retry re-runs them instead of reloading failed output. Cascades to every
+# stage completed after the earliest named one (later stages derive from
+# earlier ones), so `completed` always stays a resumable prefix. Idempotent —
+# a stage with no artifact on disk is reported under "absent".
+python3 .../run-state.py invalidate verify working_set verify-evidence
+# -> {"invalidated": ["verify", "working_set", "verify-evidence"], "absent": []}
 ```
 
 ## Lifecycle
@@ -78,5 +86,6 @@ python3 .../run-state.py done                 # -> {"cleared": true}
 - **Resumed run** — a token-limit continuation re-invokes the skill; `begin` finds today's manifest and returns `resume: true` with `completed`. The agent `load`s each completed stage instead of recomputing it and resumes at the first uncompleted stage.
 - **Success** — Step 8 finishes the state write and stampers, then calls `done` to remove the directory. The next run starts clean.
 - **Failure** — on a technical failure the agent stops without `done`; artifacts persist so a same-day retry resumes. A retry on a later UTC day resets to a fresh full run.
+- **Verification-gate failure** — when `stamp-last-checked.py` exits 3 (verification not evidenced), the agent keeps the store but runs `invalidate verify working_set verify-evidence` first (SKILL.md Step 8 item 11). Without this, a same-day retry would resume from the saved `verify`/`working_set` artifacts and repeat the heartbeat refusal without a new Sessionize call; with it, the retry reloads `fetch`/`candidates` and re-runs Step 5 live.
 
 Resume is best-effort: a fresh full run is always safe (it does not depend on any saved artifact), so a missing or reset store only costs redone work, never correctness.
