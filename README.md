@@ -38,7 +38,7 @@ The CFP pipeline calls the Sessionize universal API deterministically from its o
 | `SESSIONIZE_SPEAKER_KEY` | `discover-open-cfps.py` (Step 2) | `X-API-KEY` header to `.../open-cfps` |
 | `SESSIONIZE_EVENT_API_KEY` | `verify-sessionize.py` (Step 5) | `X-API-KEY` header to `.../event?slug=` |
 
-`SESSIONIZE_API_BASE` optionally overrides the `https://sessionize.com/api/universal` base (tests / proxying). These are the same keys the NanoClaw host already holds for its `sessionize_*` tools; the tile reads them from the injected environment and bundles no secret of its own. Remaining data comes from the host `fetch_markdown` tool and public JSON feeds (`developers.events`, `javaconferences.org`); the `sessionize_*` MCP tools remain available for ad-hoc queries.
+`SESSIONIZE_API_BASE` optionally overrides the `https://sessionize.com/api/universal` base (tests / proxying). These are the same keys the NanoClaw host already holds for its `sessionize_*` tools; the plugin reads them from the injected environment and bundles no secret of its own. Remaining data comes from the host `fetch_markdown` tool and public JSON feeds (`developers.events`, `javaconferences.org`); the `sessionize_*` MCP tools remain available for ad-hoc queries.
 
 ## Runtime data
 
@@ -46,8 +46,8 @@ The skill reads and writes files under the shared `/workspace/group/` mount:
 
 | File | Access | Owner |
 |------|--------|-------|
-| `cfp-state.json` | read+write | this tile (schema-versioned, owner-migrated) |
-| `cfp-suppressed-today.json` | write | this tile |
+| `cfp-state.json` | read+write | this plugin (schema-versioned, owner-migrated) |
+| `cfp-suppressed-today.json` | write | this plugin |
 | `cfp-priorities.json` | read | owner-managed |
 | `RELEVANCE-CRITERIA.md` | read | owner-managed |
 | `travel-schedule.json` | read | written by `nanoclaw-admin`'s `nightly-external-sync` (co-loaded) |
@@ -90,7 +90,7 @@ The `nightly-cfp-sync` cadence wrapper carries its own scripts:
 
 ## Status
 
-- **V1.1** — adds the `nightly-cfp-sync` cadence wrapper alongside `check-cfps`, so the tile owns both the user-driven CFP lookup and its scheduled refresh (mirrors `nanoclaw-flight-assist` bundling its `sync-tripit` cadence driver with `check-travel-bookings`). The wrapper materialises one `scheduled_tasks` row in chats that load this overlay.
+- **V1.1** — adds the `nightly-cfp-sync` cadence wrapper alongside `check-cfps`, so the plugin owns both the user-driven CFP lookup and its scheduled refresh (mirrors `nanoclaw-flight-assist` bundling its `sync-tripit` cadence driver with `check-travel-bookings`). The wrapper materialises one `scheduled_tasks` row in chats that load this overlay.
 - **V1** — migrated `check-cfps` from `nanoclaw-admin` as a standalone per-chat overlay tile. Full multi-source discovery, source-aware Sessionize verification, AI relevance routing, persistent state with owner-side schema migration, travel-conflict detection, and priority-interest tagging.
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.

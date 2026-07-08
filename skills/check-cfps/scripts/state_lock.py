@@ -10,7 +10,7 @@ the same /workspace/group/ volume, so this is a real interleaving, not a
 theoretical one.
 
 This module is the shared write discipline: every cfp-state.json writer
-in this tile runs its read-modify-write inside `locked(state_path)` —
+in this plugin runs its read-modify-write inside `locked(state_path)` —
 the maintenance scripts (backfill-source, backfill-name, dedup-by-url,
 expire-cfps, stamp-schema-version, stamp-last-checked) and the Step 8
 committer (commit-state.py), which replaces direct agent-side writes.
@@ -19,7 +19,7 @@ The lock is an advisory `fcntl.flock` on a sibling `<name>.lock` file
 inode, which would drop the lock mid-write). Readers that only snapshot
 the file (check-cfps-fetch) do not need the lock: os.replace guarantees
 they see a complete old or complete new file. The one writer outside
-this tile, morning-brief's `--mark-shown` (nanoclaw-admin), must adopt
+this plugin, morning-brief's `--mark-shown` (nanoclaw-admin), must adopt
 the same lock file to be fully covered — tracked as a follow-up issue
 in this repo.
 

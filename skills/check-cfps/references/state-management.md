@@ -32,7 +32,7 @@ Record Baruch's dismissal reason in `baruch_notes`. When a deadline expires with
 
 `matched_interests` is an orthogonal axis to `status` (jbaruch/nanoclaw-admin#308). Step 6 judges each `open`/`approved` CFP against the operator-owned priority list and records the matched interest `id`s. The morning brief partitions on this field: a non-empty list OR an absent field → pinned brief; an explicit empty list `[]` → separate non-pinned follow-up. The absent-vs-empty distinction is load-bearing — never normalise absent to `[]`.
 
-Priorities live at `/workspace/group/cfp-priorities.json` — operator-owned, same provenance as `RELEVANCE-CRITERIA.md`, NOT shipped in the tile. The interest taxonomy is data, not code: edit this file to change what's priority (drop Java, add Rust) with no skill or schema change. Each interest carries `id`, `label`, `keywords`, `sources`, and an optional free-text `note`. Shape:
+Priorities live at `/workspace/group/cfp-priorities.json` — operator-owned, same provenance as `RELEVANCE-CRITERIA.md`, NOT shipped in the plugin. The interest taxonomy is data, not code: edit this file to change what's priority (drop Java, add Rust) with no skill or schema change. Each interest carries `id`, `label`, `keywords`, `sources`, and an optional free-text `note`. Shape:
 
 ```json
 {

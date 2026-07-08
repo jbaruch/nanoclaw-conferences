@@ -75,7 +75,7 @@ def _load_sibling(filename: str, attr: str):
         raise ImportError(
             f"cannot load {filename} from {sibling}: the check-cfps script "
             "bundle looks incomplete — restore the sibling script next to "
-            "expire-cfps.py (or reinstall the tile) and retry"
+            "expire-cfps.py (or reinstall the plugin) and retry"
         )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -98,7 +98,7 @@ def _load_state_lock():
         raise ImportError(
             f"cannot load state_lock.py from {sibling}: the check-cfps script "
             "bundle looks incomplete — restore the sibling module next to "
-            "expire-cfps.py (or reinstall the tile) and retry"
+            "expire-cfps.py (or reinstall the plugin) and retry"
         )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
