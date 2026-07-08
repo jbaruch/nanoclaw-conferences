@@ -2,6 +2,12 @@
 
 All notable changes to this tile are documented here.
 
+## 0.1.20 — 2026-07-08
+
+### Fixed
+
+- Release/docs metadata caught up with shipped state (jbaruch/nanoclaw-conferences#34): backfilled the missing `0.1.15` changelog entry and refreshed the README script inventory with the runtime scripts the workflow already invokes (`discover-open-cfps.py`, `verify-sessionize.py`, `run-state.py`, `stamp-last-checked.py`, `state_lock.py`, `commit-state.py`).
+
 ## 0.1.19 — 2026-07-08
 
 ### Fixed
@@ -28,6 +34,12 @@ All notable changes to this tile are documented here.
 
 - `check-cfps-fetch.py` no longer fails open when `cfp-state.json` exists but cannot be read or parsed (jbaruch/nanoclaw-conferences#30). Previously any read/parse failure was downgraded to a warning and an empty state, silently dropping `sent`/`dismissed`/`remind`/`_blocked_prefixes` filtering so already-actioned CFPs re-entered the candidate pool as new. Now the script exits 1 with a stderr diagnostic and produces no output; SKILL.md Step 3 already aborts on non-zero exit. An absent state file (first run) still means empty state.
 - State-maintenance scripts now return their documented exit-1 stderr diagnostic when `cfp-state.json` exists but is not valid UTF-8, instead of escaping with an unhandled `UnicodeDecodeError` traceback (jbaruch/nanoclaw-conferences#32): `audit-sessionize-key-drift.py`, `backfill-name.py`, `backfill-source.py`, `dedup-by-url.py`, `expire-cfps.py`. `stamp-schema-version.py` likewise now reports a write-side `OSError` (e.g. read-only state directory) as a diagnostic + exit 1 instead of a traceback.
+
+## 0.1.15 — 2026-07-07
+
+### Changed
+
+- Added `.github/mcp.json` (GitHub Copilot CLI MCP config emitted by current tessl CLI init) to the tessl consumer-side scaffolding ignore block, which predated it (jbaruch/nanoclaw-conferences#29). No skill or script changes. (Entry backfilled by #34 — the release shipped without one.)
 
 ## 0.1.14 — 2026-07-07
 

@@ -67,15 +67,21 @@ Reads of admin-owned files resolve because admin co-loads with this overlay in t
 The skill bundle includes deterministic scripts the agent invokes from the SKILL.md steps:
 
 - `scripts/check-cfps-fetch.py` — fetches + filters CFPs from the public feeds, applies the source-list and blocklist
+- `scripts/discover-open-cfps.py` — Step 2 deterministic Sessionize open-CFP discovery via the speaker API (candidate shape and filter rules in its docstring)
 - `scripts/prepare-sessionize-batch.py` — routes entries by effective source and derives Sessionize slugs for a single batched verification call
 - `scripts/apply-sessionize-results.py` — joins batched Sessionize results back to entries and emits per-entry verdicts
+- `scripts/verify-sessionize.py` — Step 5 verification driver: collapses prepare → live universal-API round-trip → apply into one invocation and writes the `verify-evidence.json` marker
 - `scripts/backfill-source.py` — infers a missing `source` from the `cfp_url` host
 - `scripts/backfill-name.py` — derives a fallback `name` for nameless records from the slug or `cfp_url`
 - `scripts/expire-cfps.py` — expires stale non-Sessionize `open`/`approved` entries whose deadline passed
 - `scripts/match-priorities.py` — deterministic priority-interest prefilter
 - `scripts/dedup-by-url.py` — collapses entries whose `cfp_url` normalises to the same host+path, preserving the highest-priority source attribution and inheriting missing metadata from dropped copies
+- `scripts/commit-state.py` — lock-owning committer for the Step 8 working-set write (the agent never writes `cfp-state.json` directly)
 - `scripts/stamp-schema-version.py` — owner-side `schema_version` stamper for `cfp-state.json`
+- `scripts/stamp-last-checked.py` — evidence-gated single writer of the `_last_checked` freshness heartbeat (exit 3 = verification not evidenced)
+- `scripts/run-state.py` — per-run checkpoint store for resumable runs (`begin`/`save`/`load`/`invalidate`/`done`; schema in `references/run-state.md`)
 - `scripts/audit-sessionize-key-drift.py` — reports Sessionize slug drift in stored state
+- `scripts/state_lock.py` — shared advisory-flock module (not a CLI) that serialises every `cfp-state.json` mutator's read-modify-write
 
 The `nightly-cfp-sync` cadence wrapper carries its own scripts:
 
