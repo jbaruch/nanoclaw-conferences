@@ -312,14 +312,17 @@ def test_invalidate_skips_invalid_cascaded_manifest_entries(run_state, monkeypat
     outside = run_dir.parent / "escape.json"
     outside.write_text("{}", encoding="utf-8")
     manifest = _manifest(run_dir)
-    manifest["completed"] = ["verify", "../escape"]
+    # Unhashable garbage BEFORE the target exercises the membership gate
+    # (a raw `s in set(...)` would TypeError); "../escape" after it
+    # exercises the traversal gate on cascaded names.
+    manifest["completed"] = [["bad"], "verify", "../escape"]
     (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
     rc = module.main(["invalidate", "verify"])
     assert rc == 0
     assert _out(capsys) == {"invalidated": ["verify"], "absent": []}
     assert outside.exists()
-    assert _manifest(run_dir)["completed"] == []
+    assert _manifest(run_dir)["completed"] == [["bad"]]
 
 
 def test_invalidate_manifest_write_failure_keeps_artifacts(run_state, monkeypatch, capsys):

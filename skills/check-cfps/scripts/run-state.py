@@ -238,13 +238,17 @@ def cmd_invalidate(run_dir: Path, stages: list) -> int:
     if manifest is not None:
         completed = manifest.get("completed")
         if isinstance(completed, list):
-            named_indexes = [i for i, s in enumerate(completed) if s in set(targets)]
+            # Manifest content is data, not trusted input: entries may be
+            # non-string/unhashable (would TypeError on set membership) or
+            # traversal-shaped like "../escape" (must never reach the
+            # unlink below). Gate every element before using it.
+            named = set(targets)
+            named_indexes = [
+                i for i, s in enumerate(completed) if isinstance(s, str) and s in named
+            ]
             if named_indexes:
                 cut = min(named_indexes)
                 for cascaded in completed[cut:]:
-                    # Manifest content is data, not trusted input — a
-                    # corrupt/tampered entry like "../escape" must not
-                    # reach the unlink below and traverse out of run_dir.
                     if not isinstance(cascaded, str) or not STAGE_RE.match(cascaded):
                         continue
                     if cascaded not in targets:
