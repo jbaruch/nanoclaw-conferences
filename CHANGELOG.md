@@ -1,6 +1,12 @@
 # Changelog
 
-All notable changes to this tile are documented here.
+All notable changes to this plugin are documented here.
+
+## 0.1.21 — 2026-07-08
+
+### Changed
+
+- Migrated off the deprecated `tile.json` / `.tileignore` packaging (jbaruch/nanoclaw-conferences#37): the manifest now lives at `.tessl-plugin/plugin.json` (via `tessl plugin migrate`), `.tileignore` became `.tesslignore`, and the obsolete `tile.json` is gone. The publish workflow was renamed `publish-tile.yml` → `publish-plugin.yml` ("Review & Publish Plugin") and now runs `tessl plugin lint`. Package-sense "tile" wording across scripts, docs, and ignore-file comments reads "plugin"; the NanoClaw host concept (`containerConfig.additionalTiles`, "overlay tile") and historical changelog entries keep their original wording.
 
 ## 0.1.20 — 2026-07-08
 
