@@ -61,6 +61,19 @@ def state_lock():
 
 
 @pytest.fixture
+def commit_state():
+    """Load check-cfps/scripts/commit-state.py — the lock-owning Step 8
+    committer. Takes the working set as JSON on stdin (patched via
+    monkeypatch) and the state path via `--state`; tests call
+    `module.main(["--state", ...])` and capture stdout/stderr via
+    capsys."""
+    return _load(
+        "commit_state_under_test",
+        "skills/check-cfps/scripts/commit-state.py",
+    )
+
+
+@pytest.fixture
 def backfill_source():
     """Load check-cfps/scripts/backfill-source.py.
 
