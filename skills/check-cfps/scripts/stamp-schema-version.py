@@ -12,7 +12,8 @@ Skips `_`-prefixed config keys (e.g. `_blocked_prefixes`) and any non-dict
 value. Idempotent: a record already at SUPPORTED_SCHEMA_VERSION is untouched,
 and the file is rewritten only when at least one record changed. Atomic write
 (temp + fsync + os.replace, UTF-8, mode-preserving) so an interrupted run
-can't truncate the state file.
+can't truncate the state file. The read-modify-write runs under the shared
+advisory lock (state_lock.py) so concurrent writers cannot lose updates.
 
 Output (stdout): JSON `{"total": M, "stamped": N}` — M record dicts seen,
 N newly stamped this run. Exit 0 on success; exit non-zero with a stderr
@@ -20,11 +21,33 @@ diagnostic when cfp-state.json is missing / unreadable / not a JSON object.
 """
 
 import argparse
+import importlib.util
 import json
 import os
 import sys
 import tempfile
 from pathlib import Path
+
+
+def _load_state_lock():
+    """Reuse the shared advisory-lock module from the sibling
+    state_lock.py so the cfp-state write discipline has exactly one
+    definition (same reuse pattern as backfill-name.py's
+    `_load_dedup_helpers`)."""
+    sibling = Path(__file__).with_name("state_lock.py")
+    spec = importlib.util.spec_from_file_location("_cfps_state_lock", sibling)
+    if spec is None or spec.loader is None:
+        raise ImportError(
+            f"cannot load state_lock.py from {sibling}: the check-cfps script "
+            "bundle looks incomplete — restore the sibling module next to "
+            "stamp-schema-version.py (or reinstall the tile) and retry"
+        )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+state_lock = _load_state_lock()
 
 DEFAULT_STATE_PATH = Path("/workspace/group/cfp-state.json")
 SUPPORTED_SCHEMA_VERSION = 1
@@ -89,29 +112,39 @@ def main(argv=None):
     args = parser.parse_args(argv)
 
     try:
-        state = json.loads(args.state.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-        sys.stderr.write(
-            f"stamp-schema-version: cannot read {args.state}: {type(exc).__name__}: {exc}\n"
-        )
-        return 1
-    if not isinstance(state, dict):
-        sys.stderr.write(
-            f"stamp-schema-version: {args.state} root is "
-            f"{type(state).__name__}, expected a JSON object\n"
-        )
+        with state_lock.locked(args.state):
+            try:
+                state = json.loads(args.state.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+                sys.stderr.write(
+                    f"stamp-schema-version: cannot read {args.state}: {type(exc).__name__}: {exc}\n"
+                )
+                return 1
+            if not isinstance(state, dict):
+                sys.stderr.write(
+                    f"stamp-schema-version: {args.state} root is "
+                    f"{type(state).__name__}, expected a JSON object\n"
+                )
+                return 1
+
+            total, stamped = stamp(state)
+            if stamped:
+                try:
+                    _atomic_write_json(args.state, state)
+                except OSError as exc:
+                    sys.stderr.write(
+                        f"stamp-schema-version: cannot write {args.state}: "
+                        f"{type(exc).__name__}: {exc}\n"
+                    )
+                    return 1
+            payload = {"total": total, "stamped": stamped}
+    except state_lock.LockError as exc:
+        sys.stderr.write(f"stamp-schema-version: {exc}\n")
         return 1
 
-    total, stamped = stamp(state)
-    if stamped:
-        try:
-            _atomic_write_json(args.state, state)
-        except OSError as exc:
-            sys.stderr.write(
-                f"stamp-schema-version: cannot write {args.state}: {type(exc).__name__}: {exc}\n"
-            )
-            return 1
-    print(json.dumps({"total": total, "stamped": stamped}))
+    # Print after releasing the lock — a blocked stdout consumer must not
+    # extend the exclusive hold beyond the read-modify-write.
+    print(json.dumps(payload))
     return 0
 
 

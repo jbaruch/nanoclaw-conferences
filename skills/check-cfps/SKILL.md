@@ -167,9 +167,17 @@ Then apply priority rules (earlier wins):
 6. Set `last_verified` to today for every `_verified_this_run: true` entry.
 7. `_verify_failed: true` AND status still `open`/`approved`: persist `stale: true` and prepend the canonical stale prefix per `references/contracts.md` (idempotent). Cleared on next successful verification.
 8. Persist `matched_interests` from Step 6 on every `open`/`approved` entry it tagged this run. When Step 6 cleared it (priorities config missing/empty), delete the field from those entries; preserve the prior value untouched on `user_actioned: true` entries.
-9. **Post-write dedup guard.** After the state write, re-run `dedup-by-url.py` (same invocation as the pre-write pass). This is the deterministic backstop against duplicate resurrection: if any write re-created a slug the pre-write dedup had merged away, this pass collapses it again before the stampers run, so on-disk state never ends a run with two slugs for one CFP (jbaruch/nanoclaw-conferences#24). A clean run reports `slugs_dropped: 0`; a non-zero count means the lookup rewrite above was missed — surface it in the run report.
+9. **Commit through the lock-owning writer — never write cfp-state.json directly.** Pipe the finished working set (JSON object of `slug → record`, `_`-prefixed keys excluded) to the committer, which applies it as per-slug replacements under the shared advisory lock (jbaruch/nanoclaw-conferences#35):
 
-10. Do NOT hand-stamp `schema_version`. After the state write, run the deterministic stamper — the single source of stamping (owner migration per `references/state-management.md` "Schema version & ownership"):
+   ```bash
+   printf '%s' '<working-set json>' | python3 /home/node/.claude/skills/tessl__check-cfps/scripts/commit-state.py
+   ```
+
+   Concurrent writers' updates to other slugs survive, and `user_actioned: true` is re-checked on disk at commit time so a mid-run user action is never overwritten — surface a non-zero `skipped_user_actioned` in the run report. Payload validation, the `_`-key refusal, and the output shape are the script's contract (`scripts/commit-state.py` docstring). Abort on non-zero exit.
+
+10. **Post-write dedup guard.** After the state write, re-run `dedup-by-url.py` (same invocation as the pre-write pass). This is the deterministic backstop against duplicate resurrection: if any write re-created a slug the pre-write dedup had merged away, this pass collapses it again before the stampers run, so on-disk state never ends a run with two slugs for one CFP (jbaruch/nanoclaw-conferences#24). A clean run reports `slugs_dropped: 0`; a non-zero count means the lookup rewrite above was missed — surface it in the run report.
+
+11. Do NOT hand-stamp `schema_version`. After the state write, run the deterministic stamper — the single source of stamping (owner migration per `references/state-management.md` "Schema version & ownership"):
 
    ```bash
    python3 /home/node/.claude/skills/tessl__check-cfps/scripts/stamp-schema-version.py
@@ -177,13 +185,13 @@ Then apply priority rules (earlier wins):
 
    It stamps `schema_version: 1` on EVERY record (incl. `user_actioned`, `dismissed`, `sent`, `remind`), idempotently, and rewrites the file only when something changed. Output: `{"total": M, "stamped": N}`. A non-zero exit means the state file is missing/unreadable — surface it.
 
-11. Do NOT hand-write the top-level `_last_checked`. After stamping schema versions, run the deterministic freshness stamper — the single writer of `_last_checked`:
+12. Do NOT hand-write the top-level `_last_checked`. After stamping schema versions, run the deterministic freshness stamper — the single writer of `_last_checked`:
 
    ```bash
    python3 /home/node/.claude/skills/tessl__check-cfps/scripts/stamp-last-checked.py
    ```
 
-   It is **evidence-gated** (jbaruch/nanoclaw-conferences#8): it advances `_last_checked` only when the `verify-sessionize.py` driver left a `verify-evidence.json` marker for this run showing ≥1 entry resolved from a live response (or there was nothing to verify). Output on a clean stamp: `{"_last_checked": "<iso>", "verification": "live"|"none-required"}`, exit 0. If verification did not happen (driver skipped, or a total Sessionize outage), it does NOT advance the heartbeat — it writes `_last_checked_skipped` and **exits 3**: treat that exit like a stamp failure (do NOT proceed to clear the checkpoint in item 12; report a skipped-verification run). On exit 3, ALSO invalidate the verification stages so a same-day retry re-runs Step 5 live instead of resuming the failed evidence (jbaruch/nanoclaw-conferences#31):
+   It is **evidence-gated** (jbaruch/nanoclaw-conferences#8): it advances `_last_checked` only when the `verify-sessionize.py` driver left a `verify-evidence.json` marker for this run showing ≥1 entry resolved from a live response (or there was nothing to verify). Output on a clean stamp: `{"_last_checked": "<iso>", "verification": "live"|"none-required"}`, exit 0. If verification did not happen (driver skipped, or a total Sessionize outage), it does NOT advance the heartbeat — it writes `_last_checked_skipped` and **exits 3**: treat that exit like a stamp failure (do NOT proceed to clear the checkpoint in item 13; report a skipped-verification run). On exit 3, ALSO invalidate the verification stages so a same-day retry re-runs Step 5 live instead of resuming the failed evidence (jbaruch/nanoclaw-conferences#31):
 
    ```bash
    python3 /home/node/.claude/skills/tessl__check-cfps/scripts/run-state.py invalidate verify working_set verify-evidence
@@ -191,13 +199,13 @@ Then apply priority rules (earlier wins):
 
    Earlier stages (`fetch`, `candidates`) stay checkpointed — only the failed verification and everything downstream of it re-runs. Exit 1 means the state file is missing/unreadable — surface it. Freshness lives here, not in per-record `updated`.
 
-12. The run completed successfully — clear the resume checkpoint store so the next run starts fresh:
+13. The run completed successfully — clear the resume checkpoint store so the next run starts fresh:
 
    ```bash
    python3 /home/node/.claude/skills/tessl__check-cfps/scripts/run-state.py done
    ```
 
-   Only here, after the state write and both stampers succeeded — and only if the freshness stamper (item 11) exited 0. If the stamper exited 3 (verification not evidenced) or an earlier step failed and you stopped, do NOT clear — the saved stages let a same-day retry resume (`references/run-state.md`).
+   Only here, after the state write and both stampers succeeded — and only if the freshness stamper (item 12) exited 0. If the stamper exited 3 (verification not evidenced) or an earlier step failed and you stopped, do NOT clear — the saved stages let a same-day retry resume (`references/run-state.md`).
 
 After writing cfp-state.json, emit the run's verification report inside an `<internal>` block. `verification` is the freshness stamper's verdict — `"live"`/`"none-required"` when it advanced `_last_checked`, or `"skipped"` when it exited 3 (no live verification this run):
 

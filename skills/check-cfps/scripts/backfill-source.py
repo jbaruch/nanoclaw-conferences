@@ -11,6 +11,8 @@ treats unsourced entries as non-Sessionize and skips the live API call (the
 safe default — won't false-stale).
 
 Idempotent. Entries that already carry a `source` value are left alone.
+The read-modify-write runs under the shared advisory lock (state_lock.py)
+so concurrent writers cannot lose updates.
 
 Usage:
   python3 backfill-source.py [--state-path /path/to/cfp-state.json]
@@ -28,6 +30,7 @@ non-zero on read/write failure (with diagnostic on stderr).
 """
 
 import argparse
+import importlib.util
 import json
 import os
 import sys
@@ -35,6 +38,27 @@ import tempfile
 from collections import Counter
 from pathlib import Path
 from urllib.parse import urlparse
+
+
+def _load_state_lock():
+    """Reuse the shared advisory-lock module from the sibling
+    state_lock.py so the cfp-state write discipline has exactly one
+    definition (same reuse pattern as backfill-name.py's
+    `_load_dedup_helpers`)."""
+    sibling = Path(__file__).with_name("state_lock.py")
+    spec = importlib.util.spec_from_file_location("_cfps_state_lock", sibling)
+    if spec is None or spec.loader is None:
+        raise ImportError(
+            f"cannot load state_lock.py from {sibling}: the check-cfps script "
+            "bundle looks incomplete — restore the sibling module next to "
+            "backfill-source.py (or reinstall the tile) and retry"
+        )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+state_lock = _load_state_lock()
 
 DEFAULT_STATE_PATH = Path("/workspace/group/cfp-state.json")
 
@@ -121,67 +145,73 @@ def main(argv: list[str]) -> int:
         return 0
 
     try:
-        state = json.loads(args.state_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-        sys.stderr.write(
-            f"backfill-source: failed to read {args.state_path}: {type(exc).__name__}: {exc}\n"
-        )
-        return 1
-
-    if not isinstance(state, dict):
-        sys.stderr.write(
-            f"backfill-source: {args.state_path} root is "
-            f"{type(state).__name__}, expected dict; aborting\n"
-        )
-        return 1
-
-    backfilled, skipped_existing, unsourced_remaining, by_source = backfill(state)
-
-    if backfilled > 0:
-        # Atomic write via temp file + os.replace — main groups run default
-        # and maintenance containers concurrently against the same
-        # /workspace/group/ directory, so a plain write_text would race
-        # with check-cfps or morning-brief --mark-shown writes; whichever
-        # write loses the race silently drops the other's changes. The
-        # temp file lives in the same directory as the target so the
-        # final os.replace stays on a single filesystem (replace is only
-        # atomic within one filesystem) and the partial file is never
-        # visible at the target path.
-        target = args.state_path
-        try:
-            fd, tmp_path = tempfile.mkstemp(
-                prefix=target.name + ".",
-                suffix=".tmp",
-                dir=str(target.parent),
-            )
+        with state_lock.locked(args.state_path):
             try:
-                with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                    fh.write(json.dumps(state, ensure_ascii=False, indent=2) + "\n")
-                os.replace(tmp_path, target)
-            except OSError:
-                # Best-effort cleanup of the orphan temp file; the outer
-                # except still fires with the original error.
-                try:
-                    os.unlink(tmp_path)
-                except FileNotFoundError:
-                    pass
-                raise
-        except OSError as exc:
-            sys.stderr.write(
-                f"backfill-source: failed to write {target}: {type(exc).__name__}: {exc}\n"
-            )
-            return 1
+                state = json.loads(args.state_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+                sys.stderr.write(
+                    f"backfill-source: failed to read {args.state_path}: "
+                    f"{type(exc).__name__}: {exc}\n"
+                )
+                return 1
 
-    print(
-        json.dumps(
-            {
+            if not isinstance(state, dict):
+                sys.stderr.write(
+                    f"backfill-source: {args.state_path} root is "
+                    f"{type(state).__name__}, expected dict; aborting\n"
+                )
+                return 1
+
+            backfilled, skipped_existing, unsourced_remaining, by_source = backfill(state)
+
+            if backfilled > 0:
+                # Atomic write via temp file + os.replace — main groups run default
+                # and maintenance containers concurrently against the same
+                # /workspace/group/ directory, so a plain write_text would race
+                # with check-cfps or morning-brief --mark-shown writes; whichever
+                # write loses the race silently drops the other's changes. The
+                # temp file lives in the same directory as the target so the
+                # final os.replace stays on a single filesystem (replace is only
+                # atomic within one filesystem) and the partial file is never
+                # visible at the target path.
+                target = args.state_path
+                try:
+                    fd, tmp_path = tempfile.mkstemp(
+                        prefix=target.name + ".",
+                        suffix=".tmp",
+                        dir=str(target.parent),
+                    )
+                    try:
+                        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                            fh.write(json.dumps(state, ensure_ascii=False, indent=2) + "\n")
+                        os.replace(tmp_path, target)
+                    except OSError:
+                        # Best-effort cleanup of the orphan temp file; the outer
+                        # except still fires with the original error.
+                        try:
+                            os.unlink(tmp_path)
+                        except FileNotFoundError:
+                            pass
+                        raise
+                except OSError as exc:
+                    sys.stderr.write(
+                        f"backfill-source: failed to write {target}: {type(exc).__name__}: {exc}\n"
+                    )
+                    return 1
+
+            payload = {
                 "backfilled": backfilled,
                 "skipped_existing_source": skipped_existing,
                 "unsourced_remaining": unsourced_remaining,
                 "by_source": dict(by_source),
             }
-        )
-    )
+    except state_lock.LockError as exc:
+        sys.stderr.write(f"backfill-source: {exc}\n")
+        return 1
+
+    # Print after releasing the lock — a blocked stdout consumer must not
+    # extend the exclusive hold beyond the read-modify-write.
+    print(json.dumps(payload))
     return 0
 
 

@@ -45,6 +45,35 @@ def check_cfps_fetch(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def state_lock():
+    """Load check-cfps/scripts/state_lock.py — the shared advisory
+    flock module every cfp-state.json mutator wraps its read-modify-
+    write in. Importable module only (no CLI); tests drive
+    `module.locked(state_path, timeout=...)` directly and assert on
+    `module.LockTimeout` / `module.lock_path_for`. flock conflicts
+    across distinct fds within one process, so a lock held via this
+    instance also blocks the separate `_cfps_state_lock` instances the
+    writer scripts load at import time."""
+    return _load(
+        "state_lock_under_test",
+        "skills/check-cfps/scripts/state_lock.py",
+    )
+
+
+@pytest.fixture
+def commit_state():
+    """Load check-cfps/scripts/commit-state.py — the lock-owning Step 8
+    committer. Takes the working set as JSON on stdin (patched via
+    monkeypatch) and the state path via `--state`; tests call
+    `module.main(["--state", ...])` and capture stdout/stderr via
+    capsys."""
+    return _load(
+        "commit_state_under_test",
+        "skills/check-cfps/scripts/commit-state.py",
+    )
+
+
+@pytest.fixture
 def backfill_source():
     """Load check-cfps/scripts/backfill-source.py.
 

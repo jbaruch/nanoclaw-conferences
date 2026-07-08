@@ -30,7 +30,9 @@ invariant from `references/contracts.md` reserves them for the user
 nameless one is counted in `skipped_user_actioned` so it stays
 visible without being mutated. Idempotent. Underscore-prefixed config
 keys and non-dict entries are skipped (same contract as the sibling
-backfill-source.py).
+backfill-source.py). The read-modify-write runs under the shared
+advisory lock (state_lock.py) so concurrent writers cannot lose
+updates.
 
 Usage:
   python3 backfill-name.py [--state-path /path/to/cfp-state.json]
@@ -75,6 +77,26 @@ def _load_dedup_helpers():
 
 
 normalise_url, _atomic_write = _load_dedup_helpers()
+
+
+def _load_state_lock():
+    """Reuse the shared advisory-lock module from the sibling
+    state_lock.py so the cfp-state write discipline has exactly one
+    definition (same reuse pattern as `_load_dedup_helpers` above)."""
+    sibling = Path(__file__).with_name("state_lock.py")
+    spec = importlib.util.spec_from_file_location("_cfps_state_lock", sibling)
+    if spec is None or spec.loader is None:
+        raise ImportError(
+            f"cannot load state_lock.py from {sibling}: the check-cfps script "
+            "bundle looks incomplete — restore the sibling module next to "
+            "backfill-name.py (or reinstall the tile) and retry"
+        )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+state_lock = _load_state_lock()
 
 # One trailing year, either hyphen-joined (`devoxx-morocco-2026`) or
 # the whole slug (`2026` — degenerate, falls through to the URL).
@@ -163,43 +185,51 @@ def main(argv: list[str]) -> int:
         return 0
 
     try:
-        state = json.loads(args.state_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
-        sys.stderr.write(
-            f"backfill-name: failed to read {args.state_path}: {type(exc).__name__}: {exc}\n"
-        )
-        return 1
+        with state_lock.locked(args.state_path):
+            try:
+                state = json.loads(args.state_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+                sys.stderr.write(
+                    f"backfill-name: failed to read {args.state_path}: "
+                    f"{type(exc).__name__}: {exc}\n"
+                )
+                return 1
 
-    if not isinstance(state, dict):
-        sys.stderr.write(
-            f"backfill-name: {args.state_path} root is "
-            f"{type(state).__name__}, expected dict; aborting\n"
-        )
-        return 1
+            if not isinstance(state, dict):
+                sys.stderr.write(
+                    f"backfill-name: {args.state_path} root is "
+                    f"{type(state).__name__}, expected dict; aborting\n"
+                )
+                return 1
 
-    backfilled, skipped_named, skipped_user_actioned, unnamed_remaining, named = backfill(state)
-
-    if backfilled > 0:
-        try:
-            _atomic_write(args.state_path, state)
-        except OSError as exc:
-            sys.stderr.write(
-                f"backfill-name: failed to write {args.state_path}: {type(exc).__name__}: {exc}\n"
+            backfilled, skipped_named, skipped_user_actioned, unnamed_remaining, named = backfill(
+                state
             )
-            return 1
 
-    print(
-        json.dumps(
-            {
+            if backfilled > 0:
+                try:
+                    _atomic_write(args.state_path, state)
+                except OSError as exc:
+                    sys.stderr.write(
+                        f"backfill-name: failed to write {args.state_path}: "
+                        f"{type(exc).__name__}: {exc}\n"
+                    )
+                    return 1
+
+            payload = {
                 "backfilled": backfilled,
                 "skipped_named": skipped_named,
                 "skipped_user_actioned": skipped_user_actioned,
                 "unnamed_remaining": unnamed_remaining,
                 "named": named,
-            },
-            ensure_ascii=False,
-        )
-    )
+            }
+    except state_lock.LockError as exc:
+        sys.stderr.write(f"backfill-name: {exc}\n")
+        return 1
+
+    # Print after releasing the lock — a blocked stdout consumer must not
+    # extend the exclusive hold beyond the read-modify-write.
+    print(json.dumps(payload, ensure_ascii=False))
     return 0
 
 

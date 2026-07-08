@@ -1117,7 +1117,13 @@ def test_atomic_write_via_replace(dedup_by_url, tmp_path, capsys, monkeypatch):
     # And after the call no orphan temp file remains.
     final = _read_state(state_path)
     assert "loser-2026" not in final
-    siblings = [p for p in tmp_path.iterdir() if p.name != "cfp-state.json"]
+    siblings = [
+        p
+        for p in tmp_path.iterdir()
+        # The advisory lock file is intentional and persistent (state_lock.py)
+        # — only orphan .tmp files count as atomicity leaks.
+        if p.name not in ("cfp-state.json", "cfp-state.json.lock")
+    ]
     assert siblings == [], f"orphan temp files left behind: {siblings}"
 
 
