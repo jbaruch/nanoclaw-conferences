@@ -81,7 +81,7 @@ The skill bundle includes deterministic scripts the agent invokes from the SKILL
 - `scripts/stamp-last-checked.py` — evidence-gated single writer of the `_last_checked` freshness heartbeat (exit 3 = verification not evidenced)
 - `scripts/run-state.py` — per-run checkpoint store for resumable runs (`begin`/`save`/`load`/`invalidate`/`done`; schema in `references/run-state.md`)
 - `scripts/audit-sessionize-key-drift.py` — reports Sessionize slug drift in stored state
-- `scripts/state_lock.py` — shared advisory-flock module (not a CLI) every `cfp-state.json` mutator wraps its read-modify-write in
+- `scripts/state_lock.py` — shared advisory-flock module (not a CLI) that serialises every `cfp-state.json` mutator's read-modify-write
 
 The `nightly-cfp-sync` cadence wrapper carries its own scripts:
 
