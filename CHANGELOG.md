@@ -2,6 +2,12 @@
 
 All notable changes to this plugin are documented here.
 
+## 0.1.22 — 2026-07-10
+
+### Changed
+
+- `check-cfps` SKILL.md no longer says the `mcp__nanoclaw__sessionize_open_cfps` / `sessionize_get_events` tools "stay available for ad-hoc queries" — those host IPC handlers and their MCP shims were retired in `jbaruch/nanoclaw#769` (they were ad-hoc/overlay concerns that had leaked into core `ipc.ts`). The deterministic path is unchanged: the `discover-open-cfps.py` / `verify-sessionize.py` drivers own the Sessionize round-trip in-container, now reaching the API directly with the placeholder `X-API-KEY` the OneCLI gateway swaps. Ad-hoc Sessionize queries are an in-container API call, not an MCP tool. (Follow-up: the two driver docstrings still carry historical "mirrors the host's `sessionize_*` handler" references — maintainer-facing only, to be scrubbed separately.)
+
 ## 0.1.21 — 2026-07-08
 
 ### Changed
