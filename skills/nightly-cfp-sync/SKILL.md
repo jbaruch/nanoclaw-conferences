@@ -23,7 +23,7 @@ Before anything else, capture the run-start instant once and hold it for Step 2'
 date -u +%Y-%m-%dT%H:%M:%SZ
 ```
 
-Hold this value as the run-start. The cursor gate uses it to confirm `_last_checked` advanced *during this run* (not an earlier same-day heartbeat), so capture it before invoking check-cfps below.
+Hold this value as the run-start. Step 2 passes it to the cursor gate as `--since`, so capture it before invoking check-cfps below.
 
 `Skill(skill: "tessl__check-cfps")` — refresh open CFP data, apply Sessionize verification, update `cfp-state.json`.
 
@@ -41,7 +41,7 @@ Reachable only if Step 1 completed without a technical failure. Run the stamp sc
 python3 /home/node/.claude/skills/tessl__nightly-cfp-sync/scripts/stamp-cursor.py --since "<run-start captured in Step 1>"
 ```
 
-The stamp is **evidence-gated** (jbaruch/nanoclaw-conferences#49): it advances the cursor only when this run's verification is evidenced on the heartbeat — `cfp-state.json#_last_checked` at or after the run-start passed via `--since`, the committed verdict `stamp-last-checked.py` wrote in Step 1's inner run. The `--since` comparison is run-specific, not date-only: an earlier same-day heartbeat from a *direct* check-cfps invocation does not count as evidence for this run. This makes the "don't rest the cadence on an unverified pass" guard deterministic rather than dependent on the agent honoring Step 1's verify-skipped branch. On a clean stamp it atomic-writes `/workspace/group/state/nightly-cfp-sync-cursor.json` with `{"schema_version": 1, "last_run": "<now UTC ISO Z>"}` (the precheck reads `last_run` to gate the cadence). The verdict logic and gate predicate are the script's (`scripts/stamp-cursor.py` docstring).
+The stamp is **evidence-gated** (jbaruch/nanoclaw-conferences#49): it advances the cursor only when this run's verification is evidenced on the heartbeat, making the "don't rest the cadence on an unverified pass" guard deterministic rather than dependent on the agent honoring Step 1's verify-skipped branch. Required input: `--since` is the run-start captured in Step 1. The gate predicate is the script's (see `scripts/stamp-cursor.py` docstring). On a clean stamp it atomic-writes `/workspace/group/state/nightly-cfp-sync-cursor.json` with `{"schema_version": 1, "last_run": "<now UTC ISO Z>"}` (the precheck reads `last_run` to gate the cadence).
 
 Handle the exit code:
 
