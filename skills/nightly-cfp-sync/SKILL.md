@@ -2,6 +2,9 @@
 name: nightly-cfp-sync
 description: "Cadence wrapper that runs check-cfps on its own schedule: refresh open CFP data, apply Sessionize verification, update cfp-state.json, emit an observable-silence cursor marker. Triggers: 'cfp sync', 'sync cfps', 'nightly cfp sync', 'refresh cfps nightly'."
 cadence: "30 6 * * * (TZ=local)"
+# agentModel pin renewal (no scanner tracks model pins): revisit when a newer
+# Sonnet tier ships (e.g. Sonnet 5); before bumping, revalidate with a one-shot
+# check-cfps run and confirm verify-sessionize.py fires end-to-end (see #50).
 agentModel: "claude-sonnet-4-6"
 script: "scripts/precheck-nightly-cfp-sync.py"
 evidence: "cfp-state.json#_last_checked"
