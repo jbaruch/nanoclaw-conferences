@@ -2,6 +2,12 @@
 
 All notable changes to this plugin are documented here.
 
+## 0.1.24 — 2026-07-12
+
+### Changed
+
+- `nightly-cfp-sync` now runs on Sonnet (`claude-sonnet-4-6`) instead of Haiku (`claude-haiku-4-5-20251001`) (jbaruch/nanoclaw-conferences#50). The discover→dedup→prepare→verify→apply→stamp flow repeatedly exceeded Haiku's step adherence: #7 was a Haiku run that skipped the Sessionize round-trip and fabricated verdicts, and the 2026-07-11 run behind #49 surfaced stale `_verify_failed` flags as fresh and skipped Step 5 entirely. A 2026-07-12 one-shot Sonnet run invoked `verify-sessionize.py` 7× and completed the flow end-to-end, versus zero driver invocations across every Haiku maintenance run since 07-06. The flat-fee subscription cutover made per-token model choice cost-neutral, retiring the original tier-down rationale. Only `nightly-cfp-sync` declares `agentModel`; `check-cfps` inherits the caller's model, so the wrapper bump covers the cadence path and no second frontmatter changes. The `scheduled_tasks` row re-materialises from frontmatter on the next deploy. (Sonnet 5 is available; this pins the specific tier validated on 07-12.)
+
 ## 0.1.23 — 2026-07-12
 
 ### Fixed
