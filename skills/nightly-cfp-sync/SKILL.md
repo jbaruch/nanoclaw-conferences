@@ -2,7 +2,7 @@
 name: nightly-cfp-sync
 description: "Cadence wrapper that runs check-cfps on its own schedule: refresh open CFP data, apply Sessionize verification, update cfp-state.json, emit an observable-silence cursor marker. Triggers: 'cfp sync', 'sync cfps', 'nightly cfp sync', 'refresh cfps nightly'."
 cadence: "30 6 * * * (TZ=local)"
-agentModel: "claude-haiku-4-5-20251001"
+agentModel: "claude-sonnet-4-6"
 script: "scripts/precheck-nightly-cfp-sync.py"
 evidence: "cfp-state.json#_last_checked"
 ---
