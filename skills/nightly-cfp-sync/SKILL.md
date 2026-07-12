@@ -17,6 +17,14 @@ The fire-time precheck (`scripts/precheck-nightly-cfp-sync.py`) gates wake-ups b
 
 ## Step 1 — Refresh CFP data
 
+Before anything else, capture the run-start instant once and hold it for Step 2's cursor gate:
+
+```bash
+date -u +%Y-%m-%dT%H:%M:%SZ
+```
+
+Hold this value as the run-start. The cursor gate uses it to confirm `_last_checked` advanced *during this run* (not an earlier same-day heartbeat), so capture it before invoking check-cfps below.
+
 `Skill(skill: "tessl__check-cfps")` — refresh open CFP data, apply Sessionize verification, update `cfp-state.json`.
 
 Consume the formatted CFP list internally — do not forward it to Baruch. The skill emits a machine-readable `<internal>` block at the end with `{checked_at, new_candidates_added, existing_verified, existing_verify_failed, verification}`. Parse that JSON. If `existing_verify_failed > 0`, forward a short notice via `mcp__nanoclaw__send_message` (e.g. `"check-cfps: <N> stored CFPs failed Sessionize verification this run; bot_notes prefixed with ⚠️ STALE DATA. Will retry next cycle."`). That notice drives the `surfaced` word in Step 3.
@@ -30,10 +38,10 @@ On complete *technical* failure (both primary sources unreachable), notify Baruc
 Reachable only if Step 1 completed without a technical failure. Run the stamp script silently — its JSON stdout is internal bookkeeping; do NOT echo it or narrate "cursor stamped" / "run complete" to chat.
 
 ```bash
-python3 /home/node/.claude/skills/tessl__nightly-cfp-sync/scripts/stamp-cursor.py
+python3 /home/node/.claude/skills/tessl__nightly-cfp-sync/scripts/stamp-cursor.py --since "<run-start captured in Step 1>"
 ```
 
-The stamp is **evidence-gated** (jbaruch/nanoclaw-conferences#49): it advances the cursor only when this run's verification is evidenced on the heartbeat — `cfp-state.json#_last_checked` dated today (UTC), the committed verdict `stamp-last-checked.py` wrote in Step 1's inner run. This makes the "don't rest the cadence on an unverified pass" guard deterministic rather than dependent on the agent honoring Step 1's verify-skipped branch. On a clean stamp it atomic-writes `/workspace/group/state/nightly-cfp-sync-cursor.json` with `{"schema_version": 1, "last_run": "<now UTC ISO Z>"}` (the precheck reads `last_run` to gate the cadence). The verdict logic and gate predicate are the script's (`scripts/stamp-cursor.py` docstring).
+The stamp is **evidence-gated** (jbaruch/nanoclaw-conferences#49): it advances the cursor only when this run's verification is evidenced on the heartbeat — `cfp-state.json#_last_checked` at or after the run-start passed via `--since`, the committed verdict `stamp-last-checked.py` wrote in Step 1's inner run. The `--since` comparison is run-specific, not date-only: an earlier same-day heartbeat from a *direct* check-cfps invocation does not count as evidence for this run. This makes the "don't rest the cadence on an unverified pass" guard deterministic rather than dependent on the agent honoring Step 1's verify-skipped branch. On a clean stamp it atomic-writes `/workspace/group/state/nightly-cfp-sync-cursor.json` with `{"schema_version": 1, "last_run": "<now UTC ISO Z>"}` (the precheck reads `last_run` to gate the cadence). The verdict logic and gate predicate are the script's (`scripts/stamp-cursor.py` docstring).
 
 Handle the exit code:
 

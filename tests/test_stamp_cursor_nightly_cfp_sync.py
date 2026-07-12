@@ -16,11 +16,16 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 SCRIPT_REL = "skills/nightly-cfp-sync/scripts/stamp-cursor.py"
 
 # Frozen clock for the subprocess tests (coding-policy: testing-standards —
-# inject a fixed reference instant, never the wall clock). NOW_UTC and the
-# same-UTC-date FRESH heartbeat below drive the evidence gate deterministically.
-NOW_UTC = "2026-05-02T08:00:00Z"
-FRESH_LAST_CHECKED = "2026-05-02T07:59:00Z"  # same UTC date as NOW_UTC -> gate passes
-STALE_LAST_CHECKED = "2026-05-01T23:59:00Z"  # day before -> gate refuses
+# inject a fixed reference instant, never the wall clock). The gate is
+# run-specific: it compares _last_checked against RUN_START (the wrapper's
+# run-start instant passed via --since), not a date-only "is it today" check.
+RUN_START = "2026-05-02T06:30:00Z"  # wrapper run begins here
+NOW_UTC = "2026-05-02T06:33:00Z"  # cursor write timestamp
+FRESH_LAST_CHECKED = "2026-05-02T06:32:00Z"  # stamped during this run (>= RUN_START) -> passes
+# Earlier SAME DAY (e.g. a direct check-cfps at 06:00, before the wrapper began):
+# a date-only gate would wrongly accept this; the run-specific gate rejects it.
+EARLIER_SAME_DAY = "2026-05-02T06:00:00Z"
+STALE_LAST_CHECKED = "2026-05-01T23:59:00Z"  # prior day -> refuses
 
 
 def _write_state(path: Path, last_checked: str | None) -> Path:
@@ -84,17 +89,25 @@ def test_stamp_preserves_existing_file_mode(stamp_module, tmp_path):
     assert stat.S_IMODE(os.stat(cursor).st_mode) == 0o600
 
 
-def test_main_emits_status_stamped_and_exits_zero(tmp_path):
-    cursor = tmp_path / "cursor.json"
-    state = _write_state(tmp_path / "cfp-state.json", FRESH_LAST_CHECKED)
-    env = {**os.environ, "NIGHTLY_CFP_SYNC_CURSOR": str(cursor)}
-    proc = subprocess.run(
-        ["python3", str(REPO_ROOT / SCRIPT_REL), "--state", str(state), "--now", NOW_UTC],
+def _run(script_args, env=None):
+    return subprocess.run(
+        ["python3", str(REPO_ROOT / SCRIPT_REL), *script_args],
         capture_output=True,
         text=True,
         timeout=10,
         env=env,
     )
+
+
+# heartbeat_is_fresh takes an aware-UTC run-start instant (`since`).
+RUN_START_DT = datetime(2026, 5, 2, 6, 30, 0, tzinfo=timezone.utc)
+
+
+def test_main_emits_status_stamped_and_exits_zero(tmp_path):
+    cursor = tmp_path / "cursor.json"
+    state = _write_state(tmp_path / "cfp-state.json", FRESH_LAST_CHECKED)
+    env = {**os.environ, "NIGHTLY_CFP_SYNC_CURSOR": str(cursor)}
+    proc = _run(["--state", str(state), "--since", RUN_START, "--now", NOW_UTC], env=env)
     assert proc.returncode == 0
     payload = json.loads(proc.stdout)
     assert payload["status"] == "stamped"
@@ -105,20 +118,17 @@ def test_main_cli_flag_overrides_env_var(tmp_path):
     flag_cursor = tmp_path / "from-flag.json"
     state = _write_state(tmp_path / "cfp-state.json", FRESH_LAST_CHECKED)
     env = {**os.environ, "NIGHTLY_CFP_SYNC_CURSOR": str(env_cursor)}
-    proc = subprocess.run(
+    proc = _run(
         [
-            "python3",
-            str(REPO_ROOT / SCRIPT_REL),
             "--cursor",
             str(flag_cursor),
             "--state",
             str(state),
+            "--since",
+            RUN_START,
             "--now",
             NOW_UTC,
         ],
-        capture_output=True,
-        text=True,
-        timeout=10,
         env=env,
     )
     assert proc.returncode == 0
@@ -135,77 +145,74 @@ def test_main_exits_2_on_write_failure(tmp_path):
     locked_dir.mkdir()
     os.chmod(locked_dir, 0o500)
     try:
-        proc = subprocess.run(
+        proc = _run(
             [
-                "python3",
-                str(REPO_ROOT / SCRIPT_REL),
                 "--cursor",
                 str(locked_dir / "cursor.json"),
                 "--state",
                 str(state),
+                "--since",
+                RUN_START,
                 "--now",
                 NOW_UTC,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=10,
+            ]
         )
         assert proc.returncode == 2
     finally:
         os.chmod(locked_dir, 0o700)
 
 
-def test_heartbeat_fresh_when_last_checked_is_today(stamp_module, tmp_path):
-    state = _write_state(tmp_path / "cfp-state.json", "2026-05-02T01:23:45Z")
-    fresh, reason = stamp_module.heartbeat_is_fresh(state, "2026-05-02")
+def test_heartbeat_fresh_when_last_checked_at_or_after_run_start(stamp_module, tmp_path):
+    state = _write_state(tmp_path / "cfp-state.json", FRESH_LAST_CHECKED)
+    fresh, reason = stamp_module.heartbeat_is_fresh(state, RUN_START_DT)
     assert fresh is True
-    assert "fresh" in reason
+    assert "at/after run start" in reason
+
+
+def test_heartbeat_stale_when_earlier_same_day_than_run_start(stamp_module, tmp_path):
+    # The regression the OpenAI policy review caught (#51): an earlier same-day
+    # heartbeat (e.g. a direct check-cfps run before the wrapper started) must
+    # NOT count as evidence for this run. A date-only gate would accept it.
+    state = _write_state(tmp_path / "cfp-state.json", EARLIER_SAME_DAY)
+    fresh, reason = stamp_module.heartbeat_is_fresh(state, RUN_START_DT)
+    assert fresh is False
+    assert "predates this run's start" in reason
 
 
 def test_heartbeat_stale_when_last_checked_is_prior_day(stamp_module, tmp_path):
     state = _write_state(tmp_path / "cfp-state.json", STALE_LAST_CHECKED)
-    fresh, reason = stamp_module.heartbeat_is_fresh(state, "2026-05-02")
+    fresh, reason = stamp_module.heartbeat_is_fresh(state, RUN_START_DT)
     assert fresh is False
-    assert "stale" in reason
+    assert "predates this run's start" in reason
 
 
 def test_heartbeat_not_fresh_when_last_checked_absent(stamp_module, tmp_path):
     state = _write_state(tmp_path / "cfp-state.json", None)
-    fresh, reason = stamp_module.heartbeat_is_fresh(state, "2026-05-02")
+    fresh, reason = stamp_module.heartbeat_is_fresh(state, RUN_START_DT)
     assert fresh is False
     assert "no _last_checked" in reason
 
 
 def test_heartbeat_not_fresh_when_state_missing(stamp_module, tmp_path):
-    fresh, reason = stamp_module.heartbeat_is_fresh(tmp_path / "absent.json", "2026-05-02")
+    fresh, reason = stamp_module.heartbeat_is_fresh(tmp_path / "absent.json", RUN_START_DT)
     assert fresh is False
     assert "cannot read" in reason
 
 
 def test_heartbeat_not_fresh_when_last_checked_unparseable(stamp_module, tmp_path):
     state = _write_state(tmp_path / "cfp-state.json", "2026-05-02")  # date only, no time
-    fresh, reason = stamp_module.heartbeat_is_fresh(state, "2026-05-02")
+    fresh, reason = stamp_module.heartbeat_is_fresh(state, RUN_START_DT)
     assert fresh is False
     assert "parseable" in reason
 
 
-def test_main_exits_3_and_leaves_cursor_untouched_on_stale_heartbeat(tmp_path):
+def test_main_exits_3_on_earlier_same_day_heartbeat(tmp_path):
+    # End-to-end guard for the #51 regression: skipped nightly run + a stale
+    # same-day heartbeat -> gated refusal, cursor untouched.
     cursor = tmp_path / "cursor.json"
-    state = _write_state(tmp_path / "cfp-state.json", STALE_LAST_CHECKED)
-    proc = subprocess.run(
-        [
-            "python3",
-            str(REPO_ROOT / SCRIPT_REL),
-            "--cursor",
-            str(cursor),
-            "--state",
-            str(state),
-            "--now",
-            NOW_UTC,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=10,
+    state = _write_state(tmp_path / "cfp-state.json", EARLIER_SAME_DAY)
+    proc = _run(
+        ["--cursor", str(cursor), "--state", str(state), "--since", RUN_START, "--now", NOW_UTC]
     )
     assert proc.returncode == 3
     payload = json.loads(proc.stdout)
@@ -216,20 +223,27 @@ def test_main_exits_3_and_leaves_cursor_untouched_on_stale_heartbeat(tmp_path):
 
 def test_main_exits_3_when_state_missing(tmp_path):
     cursor = tmp_path / "cursor.json"
-    proc = subprocess.run(
+    proc = _run(
         [
-            "python3",
-            str(REPO_ROOT / SCRIPT_REL),
             "--cursor",
             str(cursor),
             "--state",
             str(tmp_path / "absent.json"),
+            "--since",
+            RUN_START,
             "--now",
             NOW_UTC,
-        ],
-        capture_output=True,
-        text=True,
-        timeout=10,
+        ]
     )
     assert proc.returncode == 3
     assert not cursor.exists()
+
+
+def test_main_errors_without_since(tmp_path):
+    # --since is required: a missing run-start must not silently pass the gate.
+    state = _write_state(tmp_path / "cfp-state.json", FRESH_LAST_CHECKED)
+    proc = _run(
+        ["--cursor", str(tmp_path / "cursor.json"), "--state", str(state), "--now", NOW_UTC]
+    )
+    assert proc.returncode != 0
+    assert not (tmp_path / "cursor.json").exists()

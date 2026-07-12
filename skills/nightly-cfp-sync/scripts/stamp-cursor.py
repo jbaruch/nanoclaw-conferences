@@ -15,20 +15,32 @@ The stamp is now *gated on the verification heartbeat*. `stamp-last-checked.py`
 (check-cfps, Step 8, runs before this stamp) is the single writer of
 `cfp-state.json#_last_checked` and advances it to `now` only when this run's
 `verify-evidence.json` marker showed a live verification (or there was nothing
-to verify). So `_last_checked` dated today is the committed verdict that
-verification happened this run. This stamp reads that verdict rather than
-re-adjudicating the evidence marker itself: one predicate, one owner, and no
-cross-skill coupling to check-cfps' run-state internals. `_last_checked` is also
-the field this skill already declares as its `evidence:` in SKILL.md frontmatter.
+to verify). So a `_last_checked` that advanced *during this wrapper run* is the
+committed verdict that verification happened this run. This stamp reads that
+verdict rather than re-adjudicating the evidence marker itself: one predicate,
+one owner, and no cross-skill coupling to check-cfps' run-state internals.
+`_last_checked` is also the field this skill already declares as its `evidence:`
+in SKILL.md frontmatter.
 
-  * `_last_checked` parses to today (UTC) -> advance the cursor (exit 0).
-  * Marker missing, unreadable, absent `_last_checked`, or stale-dated ->
-    verification is not evidenced this run: do NOT advance the cursor, write a
-    skipped payload to stdout, and exit 3 so the SKILL takes the verify-skipped
-    path and the next cadence fire retries sooner.
+The freshness test is *run-specific*, not date-only. `_last_checked` is a
+last-seen snapshot (coding-policy: stateful-artifacts — prove freshness, don't
+assume it): a date-only "is it today" check would accept an earlier same-day
+heartbeat from a *direct* `check-cfps` invocation as evidence for a nightly run
+that actually skipped verification, reopening the #49 failure class. So the gate
+compares `_last_checked` against `--since`, the instant the wrapper run began
+(captured before Step 1). Only a `_last_checked` at/after the run start was
+stamped by this run's own verification.
+
+  * `_last_checked` parses to an instant >= `--since` -> advance the cursor
+    (exit 0).
+  * Marker missing, unreadable, absent `_last_checked`, unparseable, or older
+    than the run start -> verification is not evidenced *this run*: do NOT
+    advance the cursor, write a skipped payload to stdout, and exit 3 so the
+    SKILL takes the verify-skipped path and the next cadence fire retries sooner.
 
 Exit codes: 0 cursor stamped; 2 cursor write failure (diagnostic on stderr);
-3 verification not evidenced on the heartbeat (gated refusal, cursor unchanged).
+3 verification not evidenced on the heartbeat for this run (gated refusal,
+cursor unchanged).
 """
 
 from __future__ import annotations
@@ -45,6 +57,7 @@ DEFAULT_CURSOR_PATH = "/workspace/group/state/nightly-cfp-sync-cursor.json"
 DEFAULT_STATE_PATH = "/workspace/group/cfp-state.json"
 SUPPORTED_SCHEMA = 1
 EXIT_NOT_EVIDENCED = 3
+_ISO_Z = "%Y-%m-%dT%H:%M:%SZ"
 
 
 def _atomic_write_text(path: Path, content: str, default_mode: int = 0o644) -> None:
@@ -79,17 +92,24 @@ def _atomic_write_text(path: Path, content: str, default_mode: int = 0o644) -> N
                 pass
 
 
-def heartbeat_is_fresh(state_path: Path, today: str) -> tuple[bool, str]:
+def _parse_instant(value: str) -> datetime:
+    """Parse a UTC ISO instant (`YYYY-MM-DDTHH:MM:SSZ`) into an aware datetime."""
+    return datetime.strptime(value, _ISO_Z).replace(tzinfo=timezone.utc)
+
+
+def heartbeat_is_fresh(state_path: Path, since: datetime) -> tuple[bool, str]:
     """Decide whether this run's verification is evidenced on the heartbeat.
 
     Returns `(fresh, reason)`. `fresh` is True only when `cfp-state.json`'s
-    top-level `_last_checked` parses as an ISO instant whose UTC date equals
-    `today`. `stamp-last-checked.py` advances `_last_checked` only on an
-    evidenced verification, so a today-dated value is the committed verdict that
-    verification ran this run. A missing/unreadable state file, a non-object
-    root, an absent or non-string `_last_checked`, or a stale/unparseable value
-    all mean 'not evidenced this run' — the caller must not advance the cursor.
-    The reason string is surfaced for diagnostics."""
+    top-level `_last_checked` parses as a UTC instant at or after `since` (the
+    instant the wrapper run began). `stamp-last-checked.py` advances
+    `_last_checked` only on an evidenced verification, so a value at/after the
+    run start is the committed verdict that verification ran *this run* — an
+    earlier same-day heartbeat from a direct check-cfps invocation is correctly
+    rejected. A missing/unreadable state file, a non-object root, an absent or
+    non-string `_last_checked`, or a stale/unparseable value all mean 'not
+    evidenced this run' — the caller must not advance the cursor. The reason
+    string is surfaced for diagnostics."""
     try:
         state = json.loads(state_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
@@ -100,32 +120,33 @@ def heartbeat_is_fresh(state_path: Path, today: str) -> tuple[bool, str]:
     if not isinstance(last, str):
         return False, "cfp-state.json has no _last_checked — verification not evidenced this run"
     try:
-        last_date = datetime.strptime(last, "%Y-%m-%dT%H:%M:%SZ").date().isoformat()
+        last_dt = _parse_instant(last)
     except ValueError:
         return False, f"_last_checked is not a parseable UTC instant ({last!r})"
-    if last_date != today:
+    since_iso = since.strftime(_ISO_Z)
+    if last_dt < since:
         return (
             False,
-            f"_last_checked is stale (_last_checked={last!r}, today={today}) — "
+            f"_last_checked ({last}) predates this run's start ({since_iso}) — "
             "verification not evidenced this run",
         )
-    return True, f"_last_checked fresh ({last})"
+    return True, f"_last_checked ({last}) is at/after run start ({since_iso})"
 
 
 def stamp(cursor_path: Path, now_utc: datetime) -> dict:
-    iso = now_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+    iso = now_utc.strftime(_ISO_Z)
     record = {"schema_version": SUPPORTED_SCHEMA, "last_run": iso}
     _atomic_write_text(cursor_path, json.dumps(record, indent=2) + "\n")
     return {"status": "stamped", "last_run": iso, "cursor_path": str(cursor_path)}
 
 
 def _parse_now(value: str | None) -> datetime:
-    """Injectable clock seam. `--now` (UTC ISO `...Z`) freezes 'now' for tests
-    per coding-policy: testing-standards; production omits it and uses the real
-    UTC clock."""
+    """Injectable clock seam for the cursor write timestamp. `--now` (UTC ISO
+    `...Z`) freezes 'now' for tests per coding-policy: testing-standards;
+    production omits it and uses the real UTC clock."""
     if value is None:
         return datetime.now(timezone.utc)
-    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    return _parse_instant(value)
 
 
 def main() -> int:
@@ -141,6 +162,12 @@ def main() -> int:
         help="Path to cfp-state.json read for the verification heartbeat (default: %(default)s).",
     )
     parser.add_argument(
+        "--since",
+        required=True,
+        help="Wrapper run-start instant (UTC ISO YYYY-MM-DDTHH:MM:SSZ, captured before Step 1). "
+        "The cursor advances only when _last_checked is at/after this instant.",
+    )
+    parser.add_argument(
         "--now",
         default=None,
         help="Freeze 'now' as a UTC ISO instant (YYYY-MM-DDTHH:MM:SSZ) for tests; "
@@ -148,12 +175,16 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    try:
+        since = _parse_instant(args.since)
+    except ValueError:
+        parser.error("--since must be a UTC ISO instant of the form YYYY-MM-DDTHH:MM:SSZ")
+
     now_utc = _parse_now(args.now)
-    today = now_utc.date().isoformat()
     cursor_path = Path(args.cursor)
     state_path = Path(args.state)
 
-    fresh, reason = heartbeat_is_fresh(state_path, today)
+    fresh, reason = heartbeat_is_fresh(state_path, since)
     if not fresh:
         sys.stderr.write(f"stamp-cursor: cursor not advanced — {reason}\n")
         sys.stdout.write(

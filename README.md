@@ -86,7 +86,7 @@ The skill bundle includes deterministic scripts the agent invokes from the SKILL
 The `nightly-cfp-sync` cadence wrapper carries its own scripts:
 
 - `scripts/precheck-nightly-cfp-sync.py` — fire-time precheck that gates wake-ups by the cadence cursor
-- `scripts/stamp-cursor.py` — advances the `nightly-cfp-sync-cursor.json` success cursor, gated on the verification heartbeat (`cfp-state.json#_last_checked` dated today); refuses (exit 3) on a run that skipped verification so the cadence retries instead of resting on an unverified pass
+- `scripts/stamp-cursor.py` — advances the `nightly-cfp-sync-cursor.json` success cursor, gated on the verification heartbeat (`cfp-state.json#_last_checked` at or after the wrapper run-start passed via `--since`); refuses (exit 3) on a run that skipped verification so the cadence retries instead of resting on an unverified pass
 
 ## Status
 
