@@ -2,6 +2,12 @@
 
 All notable changes to this plugin are documented here.
 
+## 0.1.23 — 2026-07-12
+
+### Fixed
+
+- `nightly-cfp-sync` no longer rests its 3-day cadence on a run that skipped Sessionize verification (jbaruch/nanoclaw-conferences#49). The 2026-07-11 run surfaced pre-existing `_verify_failed` flags as fresh, never invoked `verify-sessionize.py`, yet advanced `nightly-cfp-sync-cursor.json` anyway — the "don't stamp on a skipped run" guard lived only in SKILL prose the agent didn't honor. `stamp-cursor.py` is now evidence-gated: it advances the cursor only when the verification heartbeat (`cfp-state.json#_last_checked`, the committed verdict `stamp-last-checked.py` writes in Step 1's inner run) is at or after the wrapper run-start passed via `--since`; otherwise it exits 3 and leaves the cursor untouched so the next fire retries. The check is run-specific rather than date-only: an earlier same-day heartbeat from a direct check-cfps invocation does not count as evidence for a skipped nightly run (`stateful-artifacts` — prove freshness, don't assume it). Gating on the already-committed `_last_checked` (which advances only on evidenced verification) — rather than re-reading check-cfps' `verify-evidence.json` marker — keeps the predicate single-owner and avoids cross-skill coupling to check-cfps' run-state internals. SKILL.md Step 1 captures the run-start; Step 2 documents the exit-3 (`verify-skipped`) versus exit-2 (`cursor-stamp-fail`) handling. This is the same skip-the-verification failure class as #7/#8 in a new shape.
+
 ## 0.1.22 — 2026-07-10
 
 ### Changed
