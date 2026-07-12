@@ -38,7 +38,7 @@ The stamp is **evidence-gated** (jbaruch/nanoclaw-conferences#49): it advances t
 Handle the exit code:
 
 - **Exit 0** — cursor advanced. Stdout `{"status": "stamped", "last_run": "<iso>", "cursor_path": "<path>"}`. Proceed to Step 3.
-- **Exit 3** — verification not evidenced on the heartbeat this run (driver skipped or Sessionize unreachable); the cursor did NOT advance, by design, so the next cadence fire retries sooner. Stdout `{"status": "skipped", "verification": "unevidenced", "reason": "<why>"}`. If Step 1 did not already send the heartbeat-held notice, send it via `mcp__nanoclaw__send_message`. Emit `<internal>nightly-cfp-sync exited: verify-skipped</internal>` as your final turn text and finish here.
+- **Exit 3** — verification not evidenced on the heartbeat this run (driver skipped or Sessionize unreachable); the cursor did NOT advance, by design, so the next cadence fire retries sooner. Stdout `{"status": "skipped", "verification": "unevidenced", "reason": "<why>", "cursor_path": "<path>"}`. If Step 1 did not already send the heartbeat-held notice, send it via `mcp__nanoclaw__send_message`. Emit `<internal>nightly-cfp-sync exited: verify-skipped</internal>` as your final turn text and finish here.
 - **Exit 2** — cursor write failure (diagnostic on stderr); the cursor did NOT advance. Do NOT emit the healthy Step 3 marker, which would falsely tell the silent-success watchdog the run completed. Emit `<internal>nightly-cfp-sync exited: cursor-stamp-fail</internal>` as your final turn text and finish here. The next cadence fire retries.
 
 ## Step 3 — Observable-silence marker
