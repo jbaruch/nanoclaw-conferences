@@ -33,9 +33,13 @@ Reachable only if Step 1 completed without a technical failure. Run the stamp sc
 python3 /home/node/.claude/skills/tessl__nightly-cfp-sync/scripts/stamp-cursor.py
 ```
 
-Atomic-writes `/workspace/group/state/nightly-cfp-sync-cursor.json` with `{"schema_version": 1, "last_run": "<now UTC ISO Z>"}`. The precheck reads `last_run` to gate the cadence (cap value in the script). Stdout on success: `{"status": "stamped", "last_run": "<iso>", "cursor_path": "<path>"}`, exit 0.
+The stamp is **evidence-gated** (jbaruch/nanoclaw-conferences#49): it advances the cursor only when this run's verification is evidenced on the heartbeat — `cfp-state.json#_last_checked` dated today (UTC), the committed verdict `stamp-last-checked.py` wrote in Step 1's inner run. This makes the "don't rest the cadence on an unverified pass" guard deterministic rather than dependent on the agent honoring Step 1's verify-skipped branch. On a clean stamp it atomic-writes `/workspace/group/state/nightly-cfp-sync-cursor.json` with `{"schema_version": 1, "last_run": "<now UTC ISO Z>"}` (the precheck reads `last_run` to gate the cadence). The verdict logic and gate predicate are the script's (`scripts/stamp-cursor.py` docstring).
 
-If the stamp script exits non-zero (write failure — it writes a diagnostic to stderr), the cursor did NOT advance. Do NOT emit the healthy Step 3 marker, which would falsely tell the silent-success watchdog the run completed. Instead emit `<internal>nightly-cfp-sync exited: cursor-stamp-fail</internal>` as your final turn text and finish here. The next cadence fire retries. Only on exit 0, proceed to Step 3.
+Handle the exit code:
+
+- **Exit 0** — cursor advanced. Stdout `{"status": "stamped", "last_run": "<iso>", "cursor_path": "<path>"}`. Proceed to Step 3.
+- **Exit 3** — verification not evidenced on the heartbeat this run (driver skipped or Sessionize unreachable); the cursor did NOT advance, by design, so the next cadence fire retries sooner. Stdout `{"status": "skipped", "verification": "unevidenced", "reason": "<why>"}`. If Step 1 did not already send the heartbeat-held notice, send it via `mcp__nanoclaw__send_message`. Emit `<internal>nightly-cfp-sync exited: verify-skipped</internal>` as your final turn text and finish here.
+- **Exit 2** — cursor write failure (diagnostic on stderr); the cursor did NOT advance. Do NOT emit the healthy Step 3 marker, which would falsely tell the silent-success watchdog the run completed. Emit `<internal>nightly-cfp-sync exited: cursor-stamp-fail</internal>` as your final turn text and finish here. The next cadence fire retries.
 
 ## Step 3 — Observable-silence marker
 
