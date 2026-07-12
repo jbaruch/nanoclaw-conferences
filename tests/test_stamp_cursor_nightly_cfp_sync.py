@@ -247,3 +247,21 @@ def test_main_errors_without_since(tmp_path):
     )
     assert proc.returncode != 0
     assert not (tmp_path / "cursor.json").exists()
+
+
+def test_main_errors_actionably_on_malformed_since(tmp_path):
+    state = _write_state(tmp_path / "cfp-state.json", FRESH_LAST_CHECKED)
+    proc = _run(["--state", str(state), "--since", "not-a-timestamp", "--now", NOW_UTC])
+    assert proc.returncode == 2  # argparse usage error
+    assert "--since must be a UTC ISO instant" in proc.stderr  # actionable, not a traceback
+    assert "Traceback" not in proc.stderr
+
+
+def test_main_errors_actionably_on_malformed_now(tmp_path):
+    # The error-handling parity #51 review caught: a bad --now must yield the
+    # same actionable diagnostic as --since, never a raw traceback.
+    state = _write_state(tmp_path / "cfp-state.json", FRESH_LAST_CHECKED)
+    proc = _run(["--state", str(state), "--since", RUN_START, "--now", "nope"])
+    assert proc.returncode == 2
+    assert "--now must be a UTC ISO instant" in proc.stderr
+    assert "Traceback" not in proc.stderr

@@ -180,7 +180,11 @@ def main() -> int:
     except ValueError:
         parser.error("--since must be a UTC ISO instant of the form YYYY-MM-DDTHH:MM:SSZ")
 
-    now_utc = _parse_now(args.now)
+    try:
+        now_utc = _parse_now(args.now)
+    except ValueError:
+        parser.error("--now must be a UTC ISO instant of the form YYYY-MM-DDTHH:MM:SSZ")
+
     cursor_path = Path(args.cursor)
     state_path = Path(args.state)
 
