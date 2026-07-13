@@ -2,6 +2,24 @@
 
 All notable changes to this plugin are documented here.
 
+## 0.1.24 — 2026-07-12
+
+### Changed
+
+- `nightly-cfp-sync` now runs on Sonnet (`claude-sonnet-4-6`) instead of Haiku (`claude-haiku-4-5-20251001`) (jbaruch/nanoclaw-conferences#50). The discover→dedup→prepare→verify→apply→stamp flow repeatedly exceeded Haiku's step adherence: #7 was a Haiku run that skipped the Sessionize round-trip and fabricated verdicts, and the 2026-07-11 run behind #49 surfaced stale `_verify_failed` flags as fresh and skipped Step 5 entirely. A 2026-07-12 one-shot Sonnet run invoked `verify-sessionize.py` 7× and completed the flow end-to-end, versus zero driver invocations across every Haiku maintenance run since 07-06. The flat-fee subscription cutover made per-token model choice cost-neutral, retiring the original tier-down rationale. Only `nightly-cfp-sync` declares `agentModel`; `check-cfps` inherits the caller's model, so the wrapper bump covers the cadence path and no second frontmatter changes. The `scheduled_tasks` row re-materialises from frontmatter on the next deploy. (Sonnet 5 is available; this pins the specific tier validated on 07-12.)
+
+## 0.1.23 — 2026-07-12
+
+### Fixed
+
+- `nightly-cfp-sync` no longer rests its 3-day cadence on a run that skipped Sessionize verification (jbaruch/nanoclaw-conferences#49). The 2026-07-11 run surfaced pre-existing `_verify_failed` flags as fresh, never invoked `verify-sessionize.py`, yet advanced `nightly-cfp-sync-cursor.json` anyway — the "don't stamp on a skipped run" guard lived only in SKILL prose the agent didn't honor. `stamp-cursor.py` is now evidence-gated: it advances the cursor only when the verification heartbeat (`cfp-state.json#_last_checked`, the committed verdict `stamp-last-checked.py` writes in Step 1's inner run) is at or after the wrapper run-start passed via `--since`; otherwise it exits 3 and leaves the cursor untouched so the next fire retries. The check is run-specific rather than date-only: an earlier same-day heartbeat from a direct check-cfps invocation does not count as evidence for a skipped nightly run (`stateful-artifacts` — prove freshness, don't assume it). Gating on the already-committed `_last_checked` (which advances only on evidenced verification) — rather than re-reading check-cfps' `verify-evidence.json` marker — keeps the predicate single-owner and avoids cross-skill coupling to check-cfps' run-state internals. SKILL.md Step 1 captures the run-start; Step 2 documents the exit-3 (`verify-skipped`) versus exit-2 (`cursor-stamp-fail`) handling. This is the same skip-the-verification failure class as #7/#8 in a new shape.
+
+## 0.1.22 — 2026-07-10
+
+### Changed
+
+- `check-cfps` SKILL.md no longer says the `mcp__nanoclaw__sessionize_open_cfps` / `mcp__nanoclaw__sessionize_get_events` tools "stay available for ad-hoc queries" — those host IPC handlers and their MCP shims were retired in `jbaruch/nanoclaw#769` (they were ad-hoc/overlay concerns that had leaked into core `ipc.ts`). The deterministic path is unchanged: the `discover-open-cfps.py` / `verify-sessionize.py` drivers own the Sessionize round-trip in-container, now reaching the API directly with the placeholder `X-API-KEY` the OneCLI gateway swaps. Ad-hoc Sessionize queries are an in-container API call, not an MCP tool. (Follow-up: the two driver docstrings still carry historical "mirrors the host's `sessionize_*` handler" references — maintainer-facing only, to be scrubbed separately.)
+
 ## 0.1.21 — 2026-07-08
 
 ### Changed
