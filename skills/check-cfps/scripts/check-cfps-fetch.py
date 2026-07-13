@@ -29,7 +29,10 @@ Output JSON:
     "checked_at": "2026-03-29T05:00:00Z"
   }
 
-Exit code 0 always.
+Exit code 0 on success. Exit code 1 when cfp-state.json exists but cannot be
+read or parsed — the state filter (sent/dismissed/remind/blocked) must not be
+silently skipped, so an unreadable state file is a hard failure, never an
+empty state.
 """
 
 import json
@@ -72,14 +75,32 @@ TRAVEL_PATH = Path("/workspace/group/travel-schedule.json")
 # ---------------------------------------------------------------------------
 
 
-def make_slug(name: str) -> str:
-    """Normalize conference name to a slug including the year."""
+def make_slug(name: str, conf_date: str = "", deadline: str = "") -> str:
+    """Normalize conference name to a slug including the year.
+
+    Year priority: embedded in the name → `conf_date` year → `deadline`
+    year → current year. The wall clock is the last resort only: a
+    recurring conference whose feed name omits the year must key under
+    the year of its own dates, or it misses its existing cfp-state row
+    across year boundaries and dodges sent/dismissed/remind filtering."""
     lower = name.lower().strip()
-    # Extract trailing year if present
     year_match = re.search(r"\b(20\d\d)\b", lower)
-    year = year_match.group(1) if year_match else str(date.today().year)
-    # Remove trailing year from base (will re-append)
-    base = re.sub(r"\s*20\d\d\s*$", "", lower).strip()
+    if year_match:
+        year = year_match.group(1)
+        # Drop the matched year token wherever it sits (it is re-appended
+        # as the suffix) — stripping only a trailing year would duplicate
+        # a mid-name year: "KubeCon 2026 EU" → "kubecon-2026-eu-2026".
+        base = (lower[: year_match.start()] + " " + lower[year_match.end() :]).strip()
+    else:
+        year = ""
+        for candidate in (conf_date, deadline):
+            parsed = parse_flexible_date(candidate)
+            if parsed:
+                year = str(parsed.year)
+                break
+        if not year:
+            year = str(date.today().year)
+        base = lower
     slug_base = re.sub(r"[^a-z0-9]+", "-", base).strip("-")
     return f"{slug_base}-{year}"
 
@@ -111,7 +132,10 @@ def fetch_developers_events(warnings: list) -> list:
             if not until_ms or until_ms <= now_ms:
                 continue
 
-            deadline = date.fromtimestamp(until_ms / 1000)
+            # Feed timestamps are UTC epoch ms; convert in UTC explicitly.
+            # A naive fromtimestamp uses the host timezone and shifts
+            # deadlines by a day on non-UTC runners.
+            deadline = datetime.fromtimestamp(until_ms / 1000, tz=timezone.utc).date()
 
             conf = entry.get("conf", {})
             name = conf.get("name", "").strip()
@@ -126,7 +150,11 @@ def fetch_developers_events(warnings: list) -> list:
             conf_date = None
             if conf_dates:
                 try:
-                    conf_date = date.fromtimestamp(min(conf_dates) / 1000).isoformat()
+                    conf_date = (
+                        datetime.fromtimestamp(min(conf_dates) / 1000, tz=timezone.utc)
+                        .date()
+                        .isoformat()
+                    )
                 except (ValueError, OverflowError, OSError, TypeError) as exc:
                     # Narrow to fromtimestamp's real failure modes:
                     # ValueError for out-of-range, OverflowError for
@@ -161,7 +189,7 @@ def fetch_developers_events(warnings: list) -> list:
             # log so systematic upstream format changes become visible
             # instead of producing an empty output.
             sys.stderr.write(
-                f"check-cfps-fetch: source A entry skipped " f"({type(exc).__name__}: {exc})\n"
+                f"check-cfps-fetch: source A entry skipped ({type(exc).__name__}: {exc})\n"
             )
             continue
 
@@ -224,7 +252,7 @@ def fetch_javaconferences(warnings: list) -> list:
         except Exception as exc:
             # Per-entry guard — log skip so feed-format changes surface.
             sys.stderr.write(
-                f"check-cfps-fetch: source B entry skipped " f"({type(exc).__name__}: {exc})\n"
+                f"check-cfps-fetch: source B entry skipped ({type(exc).__name__}: {exc})\n"
             )
             continue
 
@@ -319,15 +347,34 @@ def has_travel_conflict(cfp: dict, trips: list) -> bool:
     return False
 
 
-def load_cfp_state(warnings: list) -> dict:
-    if not STATE_PATH.exists():
-        return {}
+def load_cfp_state() -> dict:
+    """Absent file = first run = empty state. Anything else that keeps the
+    state from being read or parsed is a hard failure: failing open with
+    `{}` would drop the sent/dismissed/remind filtering and resurface
+    already-actioned CFPs as new candidates. Only FileNotFoundError means
+    "first run" — an exists() pre-check would return False on e.g. a
+    permission error and silently take the empty-state path."""
     try:
-        with open(STATE_PATH) as f:
-            return json.load(f)
-    except Exception as e:
-        warnings.append(f"Failed to load cfp-state.json: {e}")
+        state = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError:
         return {}
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:
+        sys.stderr.write(
+            f"check-cfps-fetch: cannot read {STATE_PATH}: "
+            f"{type(e).__name__}: {e} — refusing to run without state "
+            f"(sent/dismissed/remind filtering would be lost); restore or "
+            f"repair the file and rerun\n"
+        )
+        sys.exit(1)
+    if not isinstance(state, dict):
+        sys.stderr.write(
+            f"check-cfps-fetch: {STATE_PATH} root is "
+            f"{type(state).__name__}, expected a JSON object — refusing to "
+            f"run without usable state (sent/dismissed/remind filtering "
+            f"would be lost); restore or repair the file and rerun\n"
+        )
+        sys.exit(1)
+    return state
 
 
 def apply_state_filter(cfp: dict, state: dict, today: date) -> bool:
@@ -392,11 +439,15 @@ def main():
 
     # Load supporting data
     trips = load_travel_schedule(warnings)
-    state = load_cfp_state(warnings)
+    state = load_cfp_state()
 
     # Enrich with slug and days_left
     for cfp in all_cfps:
-        cfp["slug"] = make_slug(cfp["name"])
+        cfp["slug"] = make_slug(
+            cfp["name"],
+            conf_date=cfp.get("conf_date", ""),
+            deadline=cfp.get("deadline", ""),
+        )
         try:
             deadline = date.fromisoformat(cfp["deadline"])
             cfp["days_left"] = (deadline - today).days

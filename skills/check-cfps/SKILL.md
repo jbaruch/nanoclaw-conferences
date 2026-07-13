@@ -24,7 +24,7 @@ python3 /home/node/.claude/skills/tessl__check-cfps/scripts/run-state.py begin
 - `{"resume": false}` — fresh run. Proceed from Step 2.
 - `{"resume": true, "completed": [...]}` — a run begun earlier today was interrupted. For each stage already in `completed`, reload its artifact with `run-state.py load <stage>` instead of recomputing it, and resume at the first step whose stage is absent.
 
-Stages, in pipeline order: `fetch` (Step 3), `candidates` (Steps 2–4 merge), `prep` / `sessionize_results` / `decisions` (Step 5), `working_set` (Steps 5–7, ready for Step 8). After producing each stage's artifact, persist it:
+Stages, in pipeline order: `fetch` (Step 3), `candidates` (Steps 2–4 merge), `verify` (Step 5 driver), `working_set` (Steps 5–7, ready for Step 8). After producing each stage's artifact, persist it:
 
 ```bash
 echo '<artifact json>' | python3 /home/node/.claude/skills/tessl__check-cfps/scripts/run-state.py save <stage>
@@ -34,11 +34,11 @@ Resume is best-effort — stages are idempotent and Step 5 re-verifies the full 
 
 ## Step 2 — Sessionize speaker API candidates
 
-```
-mcp__nanoclaw__sessionize_open_cfps(filter: {isOnline: false, isUserGroup: false})
+```bash
+python3 /home/node/.claude/skills/tessl__check-cfps/scripts/discover-open-cfps.py
 ```
 
-For each event, extract the slug from `cfpLink` (last path segment). Skip slugs already in `/workspace/group/cfp-state.json` (any status). Otherwise add to the candidate pool: `name`, `city`, `conf_date`, `deadline` (from `cfpDates.endUtc[:10]`), `cfp_url`, `slug`, `source: "sessionize-speaker-api"`. Do not write to state here.
+Discovers new Sessionize open-CFP candidates deterministically (needs the host-injected `SESSIONIZE_SPEAKER_KEY`; reads `/workspace/group/cfp-state.json` to skip already-tracked slugs). Do NOT call the Sessionize API or parse its response inline — that is the script's job (jbaruch/nanoclaw-conferences#9). Parse stdout `{candidates, counts}` and carry `candidates` into the pool. Abort if the script exits non-zero (an outage must not read as "0 new CFPs"). Do not write to state here. The candidate shape and filter rules are the script's contract (`scripts/discover-open-cfps.py` docstring).
 
 ## Step 3 — Run fetch-and-filter script
 
@@ -58,6 +58,22 @@ Read `/workspace/trusted/user_professional.md` for Baruch's current speaking top
 
 ## Step 5 — Source-aware verification
 
+**Pre-verify: name repair.** Before assembling the stored cohort, run the deterministic name backfill so no nameless record reaches Step 6 blind (a record without `name` is invisible to the priority matcher and the brief — jbaruch/nanoclaw-conferences#23):
+
+```bash
+python3 /home/node/.claude/skills/tessl__check-cfps/scripts/backfill-name.py
+```
+
+It guarantees a usable `name` on every record it can, touching nothing else and never touching `user_actioned: true` entries (immutability per `references/contracts.md`); the derivation rules are the script's contract (`scripts/backfill-name.py` docstring). Surface a non-zero `unnamed_remaining` or `skipped_user_actioned` in the run report. Abort on non-zero exit (state file unreadable).
+
+**Pre-verify: deadline expiry.** Then run the deterministic expiry pass — the single writer of `status: "expired"` (jbaruch/nanoclaw-conferences#27):
+
+```bash
+python3 /home/node/.claude/skills/tessl__check-cfps/scripts/expire-cfps.py
+```
+
+It expires stale non-Sessionize `open`/`approved` rows whose deadline has passed, so they leave the verify cohort below instead of being re-blessed every run; eligibility, guards, and the revival path are the script's contract (`scripts/expire-cfps.py` docstring). Include a non-zero `expired` count in the run report. Abort on non-zero exit (state file unreadable).
+
 Verify two cohorts:
 - **New candidates** from Steps 2–4.
 - **Already-stored `open`/`approved` entries** — every slug in `cfp-state.json` with `status in (open, approved)`.
@@ -66,31 +82,15 @@ Verify two cohorts:
 
 ### Sessionize-sourced
 
-Two deterministic helpers bracket a single batched MCP call — the agent does not derive slugs, infer sources, join results, or pick verdicts in prose.
+One deterministic driver does prepare → live per-slug verification → apply in a single invocation, calling the Sessionize API itself (host-injected `SESSIONIZE_EVENT_API_KEY`). Make the Sessionize round-trip ONLY through this script — never inline — so its large response stays out of context; do not derive slugs, join results, or pick verdicts in prose.
 
-**1. Prepare the batch.** Pass the entries to verify on stdin as a JSON array — one object per new candidate (Steps 2–4) and per stored `open`/`approved` row — each `{id, cohort: "new"|"stored", cfp_url, source?, slug?}`:
-
-```bash
-python3 /home/node/.claude/skills/tessl__check-cfps/scripts/prepare-sessionize-batch.py
-```
-
-It routes by effective source (explicit `source`, else the `cfp_url` host inference shared with `backfill-source.py`), derives each Sessionize slug, and emits `{slugs, sessionize, non_sessionize, unverifiable, counts}` — routing and slug-derivation logic in the script docstring + `references/source-routing.md`. **Checkpoint:** `save prep` (this output). Send `non_sessionize` ids to the branch below; `unverifiable` ids (Sessionize-sourced but no derivable slug) get the verification-failure protocol.
-
-**2. Batch-verify.** One MCP round-trip for the full cohort, not one call per slug:
-
-```
-mcp__nanoclaw__sessionize_get_events(slugs: <slugs from step 1>)
-```
-
-Returns one array, one entry per requested slug: `{slug, ...event fields}` or `{slug, error}`. **Checkpoint:** `save sessionize_results` (this array) — it is the one non-reproducible artifact in Step 5 (a live API response), so a continuation must reload it rather than re-issue the call.
-
-**3. Apply results.** Pass `{"prep": <step-1 output>, "results": <step-2 array>}` on stdin:
+Pass the entries to verify on stdin as a JSON array — one object per new candidate (Steps 2–4) and per stored `open`/`approved` row — each `{id, cohort: "new"|"stored", cfp_url, source?, slug?}`:
 
 ```bash
-python3 /home/node/.claude/skills/tessl__check-cfps/scripts/apply-sessionize-results.py
+python3 /home/node/.claude/skills/tessl__check-cfps/scripts/verify-sessionize.py
 ```
 
-It joins each result to its entry by `slug` (fanning one result out to **every** entry sharing it) and emits one `decision` per entry — **checkpoint:** `save decisions` (this output) — the verdict predicates and the verbatim dismissal `bot_notes` live in the script. Apply each decision to the working set:
+It verifies the Sessionize cohort against the live API (host-injected `SESSIONIZE_EVENT_API_KEY`) and writes the `verify-evidence.json` marker Step 8's stamp reads, emitting `{prep, results, decisions, summary, non_sessionize, evidence}` — the routing, verdict rules, and per-slug failure contract are the script's (`scripts/verify-sessionize.py` docstring). **Checkpoint:** `save verify` (this output). Send `non_sessionize` ids to the branch below. Apply each decision to the working set:
 - `verified` → set `deadline` to the decision's value, mark `_verified_this_run: true`, clear the stale markers per `references/contracts.md` (`stale: false`, strip the canonical `⚠️ STALE DATA` prefix, drop `_verify_skipped`), and attach the decision's `event` fields (e.g. `expenses_covered`) in memory for Steps 6/8.
 - `dismiss` → `status: "dismissed"`, `bot_notes` = the decision's `bot_notes`.
 - `drop` → drop the new candidate.
@@ -146,20 +146,20 @@ If the prefilter exits non-zero (malformed config → exit 1, malformed records 
 python3 /home/node/.claude/skills/tessl__check-cfps/scripts/dedup-by-url.py
 ```
 
-Winner-selection priority (earlier wins): a) `user_actioned: true`; b) `shown_in_brief: true`; c) `source` matches URL's host; d) alphabetically-earliest slug. Skips collision group entirely when ≥2 `user_actioned` entries share one URL (surfaces on stderr).
+Winner selection, source-priority ranking, and merge-field inheritance are the script's contract — see the `scripts/dedup-by-url.py` docstring; do not re-derive them in prose. What the skill relies on: `user_actioned` entries always win and are never mutated, and priority-bearing source attribution plus the `name` survive the merge (jbaruch/nanoclaw-conferences#23/#25). Groups the script refuses to resolve are reported in `skipped_multi_user_actioned` (stderr detail) — surface them for manual review.
 
-Then for in-memory candidates from Steps 2–4, invoke `--lookup` mode:
+Then for EVERY in-memory entry you are about to write — new candidates from Steps 2–4 AND stored rows carried through Steps 5–7 — invoke `--lookup` mode:
 
 ```bash
-printf '%s\n' "<candidate-1.cfp_url>" "<candidate-2.cfp_url>" ... \
+printf '%s\n' "<entry-1.cfp_url>" "<entry-2.cfp_url>" ... \
   | python3 /home/node/.claude/skills/tessl__check-cfps/scripts/dedup-by-url.py --lookup
 ```
 
-Reads newline-separated URLs from stdin; emits `{<input_url>: <existing_slug_or_null>}` JSON. For every non-null value, rewrite the candidate's key in the in-memory list to that existing slug. Idempotent.
+Reads newline-separated URLs from stdin; emits `{<input_url>: <existing_slug_or_null>}` JSON. For every non-null value, rewrite that entry's key in the in-memory set to the returned slug. This matters for stored rows too: the dedup pass above may have deleted a stored row's slug as a duplicate, and writing it back under its old key would resurrect the duplicate the dedup just removed (jbaruch/nanoclaw-conferences#24). If the rewrite makes two in-memory entries share a slug, they are both updates to that one state row — apply the priority rules below once for that slug. Idempotent.
 
 Then apply priority rules (earlier wins):
 
-1. **`user_actioned: true`** — preserve the entry's decision + metadata fields untouched: the bot does not refresh `updated`/`last_verified` (rules 5/6 apply only to entries actively written this run, not to preserved `user_actioned` ones) and does not re-tag `matched_interests`. The ONLY field stamped on these is `schema_version` (owner metadata, rule 9).
+1. **`user_actioned: true`** — preserve the entry's decision + metadata fields untouched: the bot does not refresh `updated`/`last_verified` (rules 5/6 apply only to entries actively written this run, not to preserved `user_actioned` ones) and does not re-tag `matched_interests`. The ONLY field stamped on these is `schema_version` (owner metadata, rule 10).
 2. **Sticky (`shown_in_brief: true`)** — preserve `status` and `bot_notes`. Allowed updates: `deadline`, `city`, `conf_date`, `updated`, `last_verified`, `stale` + `⚠️ STALE DATA` prefix. Exception: Step 5 confirmed closed or online overrides stickiness.
 3. **Existing `open`/`approved` without sticky** — update status, `bot_notes`, metadata. Downgrade-to-dismissed MUST set `status: "dismissed"`.
 4. **New entries** — write status and `bot_notes` from Steps 6–7. Inherit `_verified_this_run: true` from Step 5. New entries that fail Sessionize verification are dropped.
@@ -167,7 +167,17 @@ Then apply priority rules (earlier wins):
 6. Set `last_verified` to today for every `_verified_this_run: true` entry.
 7. `_verify_failed: true` AND status still `open`/`approved`: persist `stale: true` and prepend the canonical stale prefix per `references/contracts.md` (idempotent). Cleared on next successful verification.
 8. Persist `matched_interests` from Step 6 on every `open`/`approved` entry it tagged this run. When Step 6 cleared it (priorities config missing/empty), delete the field from those entries; preserve the prior value untouched on `user_actioned: true` entries.
-9. Do NOT hand-stamp `schema_version`. After the state write, run the deterministic stamper — the single source of stamping (owner migration per `references/state-management.md` "Schema version & ownership"):
+9. **Commit through the lock-owning writer — never write cfp-state.json directly.** Pipe the finished working set (JSON object of `slug → record`, `_`-prefixed keys excluded) to the committer, which applies it as per-slug replacements under the shared advisory lock (jbaruch/nanoclaw-conferences#35):
+
+   ```bash
+   printf '%s' '<working-set json>' | python3 /home/node/.claude/skills/tessl__check-cfps/scripts/commit-state.py
+   ```
+
+   Concurrent writers' updates to other slugs survive, and `user_actioned: true` is re-checked on disk at commit time so a mid-run user action is never overwritten — surface a non-zero `skipped_user_actioned` in the run report. Payload validation, the `_`-key refusal, and the output shape are the script's contract (`scripts/commit-state.py` docstring). Abort on non-zero exit.
+
+10. **Post-write dedup guard.** After the state write, re-run `dedup-by-url.py` (same invocation as the pre-write pass). This is the deterministic backstop against duplicate resurrection: if any write re-created a slug the pre-write dedup had merged away, this pass collapses it again before the stampers run, so on-disk state never ends a run with two slugs for one CFP (jbaruch/nanoclaw-conferences#24). A clean run reports `slugs_dropped: 0`; a non-zero count means the lookup rewrite above was missed — surface it in the run report.
+
+11. Do NOT hand-stamp `schema_version`. After the state write, run the deterministic stamper — the single source of stamping (owner migration per `references/state-management.md` "Schema version & ownership"):
 
    ```bash
    python3 /home/node/.claude/skills/tessl__check-cfps/scripts/stamp-schema-version.py
@@ -175,27 +185,33 @@ Then apply priority rules (earlier wins):
 
    It stamps `schema_version: 1` on EVERY record (incl. `user_actioned`, `dismissed`, `sent`, `remind`), idempotently, and rewrites the file only when something changed. Output: `{"total": M, "stamped": N}`. A non-zero exit means the state file is missing/unreadable — surface it.
 
-10. Do NOT hand-write the top-level `_last_checked`. After stamping schema versions, run the deterministic freshness stamper — the single writer of `_last_checked`:
+12. Do NOT hand-write the top-level `_last_checked`. After stamping schema versions, run the deterministic freshness stamper — the single writer of `_last_checked`:
 
    ```bash
    python3 /home/node/.claude/skills/tessl__check-cfps/scripts/stamp-last-checked.py
    ```
 
-   It sets the top-level `_last_checked` to the run timestamp unconditionally (a run that changed no record still checked, so the heartbeat must advance), touching nothing else. Output: `{"_last_checked": "<iso>"}`. A non-zero exit means the state file is missing/unreadable — surface it. Freshness lives here, not in per-record `updated`: read `_last_checked` to tell "pipeline ran" from "data unchanged."
+   It is **evidence-gated** (jbaruch/nanoclaw-conferences#8): it advances `_last_checked` only when the `verify-sessionize.py` driver left a `verify-evidence.json` marker for this run showing ≥1 entry resolved from a live response (or there was nothing to verify). Output on a clean stamp: `{"_last_checked": "<iso>", "verification": "live"|"none-required"}`, exit 0. If verification did not happen (driver skipped, or a total Sessionize outage), it does NOT advance the heartbeat — it writes `_last_checked_skipped` and **exits 3**: treat that exit like a stamp failure (do NOT proceed to clear the checkpoint in item 13; report a skipped-verification run). On exit 3, ALSO invalidate the verification stages so a same-day retry re-runs Step 5 live instead of resuming the failed evidence (jbaruch/nanoclaw-conferences#31):
 
-11. The run completed successfully — clear the resume checkpoint store so the next run starts fresh:
+   ```bash
+   python3 /home/node/.claude/skills/tessl__check-cfps/scripts/run-state.py invalidate verify working_set verify-evidence
+   ```
+
+   Earlier stages (`fetch`, `candidates`) stay checkpointed — only the failed verification and everything downstream of it re-runs. Exit 1 means the state file is missing/unreadable — surface it. Freshness lives here, not in per-record `updated`.
+
+13. The run completed successfully — clear the resume checkpoint store so the next run starts fresh:
 
    ```bash
    python3 /home/node/.claude/skills/tessl__check-cfps/scripts/run-state.py done
    ```
 
-   Only here, after the state write and both stampers succeeded. If an earlier step failed and you stopped, do NOT clear — the saved stages let a same-day retry resume (`references/run-state.md`).
+   Only here, after the state write and both stampers succeeded — and only if the freshness stamper (item 12) exited 0. If the stamper exited 3 (verification not evidenced) or an earlier step failed and you stopped, do NOT clear — the saved stages let a same-day retry resume (`references/run-state.md`).
 
-After writing cfp-state.json, emit the run's verification report inside an `<internal>` block:
+After writing cfp-state.json, emit the run's verification report inside an `<internal>` block. `verification` is the freshness stamper's verdict — `"live"`/`"none-required"` when it advanced `_last_checked`, or `"skipped"` when it exited 3 (no live verification this run):
 
 ```
 <internal>
-{"checked_at": "<ISO>", "new_candidates_added": N, "existing_verified": N, "existing_verify_failed": N}
+{"checked_at": "<ISO>", "new_candidates_added": N, "existing_verified": N, "existing_verify_failed": N, "verification": "live"|"none-required"|"skipped"}
 </internal>
 ```
 

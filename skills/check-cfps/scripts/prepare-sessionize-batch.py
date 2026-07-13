@@ -4,8 +4,9 @@
 Given the entries Step 5 must verify (new candidates from Steps 2-4 plus
 stored `open`/`approved` rows), this script decides — deterministically —
 which ones are Sessionize-sourced, derives each one's Sessionize slug, and
-emits the unique slug list to hand to the `sessionize_get_events` MCP call
-together with a join table for `apply-sessionize-results.py`.
+emits the unique slug list for the verify driver's Sessionize events fetch
+(`verify-sessionize.py`, which imports this module) together with a join
+table for `apply-sessionize-results.py`.
 
 Routing matches `references/source-routing.md`: an entry's *effective
 source* is its explicit `source`, or — when `source` is absent — the host
@@ -60,7 +61,7 @@ def _load_infer_source():
         raise ImportError(
             f"cannot load backfill-source.py from {sibling}: the check-cfps script "
             "bundle looks incomplete — restore the sibling script next to "
-            "prepare-sessionize-batch.py (or reinstall the tile) and retry"
+            "prepare-sessionize-batch.py (or reinstall the plugin) and retry"
         )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -170,7 +171,7 @@ def main(argv: list[str]) -> int:
             return 1
         if entry.get("cohort") not in ("new", "stored"):
             sys.stderr.write(
-                f'prepare-sessionize-batch: entry {entry_id!r} needs '
+                f"prepare-sessionize-batch: entry {entry_id!r} needs "
                 f'`cohort` of "new" or "stored"; got {entry.get("cohort")!r}\n'
             )
             return 1

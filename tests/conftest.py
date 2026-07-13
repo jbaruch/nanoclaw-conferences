@@ -45,6 +45,35 @@ def check_cfps_fetch(tmp_path, monkeypatch):
 
 
 @pytest.fixture
+def state_lock():
+    """Load check-cfps/scripts/state_lock.py — the shared advisory
+    flock module every cfp-state.json mutator wraps its read-modify-
+    write in. Importable module only (no CLI); tests drive
+    `module.locked(state_path, timeout=...)` directly and assert on
+    `module.LockTimeout` / `module.lock_path_for`. flock conflicts
+    across distinct fds within one process, so a lock held via this
+    instance also blocks the separate `_cfps_state_lock` instances the
+    writer scripts load at import time."""
+    return _load(
+        "state_lock_under_test",
+        "skills/check-cfps/scripts/state_lock.py",
+    )
+
+
+@pytest.fixture
+def commit_state():
+    """Load check-cfps/scripts/commit-state.py — the lock-owning Step 8
+    committer. Takes the working set as JSON on stdin (patched via
+    monkeypatch) and the state path via `--state`; tests call
+    `module.main(["--state", ...])` and capture stdout/stderr via
+    capsys."""
+    return _load(
+        "commit_state_under_test",
+        "skills/check-cfps/scripts/commit-state.py",
+    )
+
+
+@pytest.fixture
 def backfill_source():
     """Load check-cfps/scripts/backfill-source.py.
 
@@ -57,6 +86,36 @@ def backfill_source():
     return _load(
         "backfill_source_under_test",
         "skills/check-cfps/scripts/backfill-source.py",
+    )
+
+
+@pytest.fixture
+def backfill_name():
+    """Load check-cfps/scripts/backfill-name.py.
+
+    Same CLI shape as `backfill_source`: `--state-path` arg, JSON to
+    stdout, no module-level paths to monkeypatch. The module reuses
+    `normalise_url` and `_atomic_write` from the sibling
+    dedup-by-url.py at import time, so loading it exercises that
+    import path too."""
+    return _load(
+        "backfill_name_under_test",
+        "skills/check-cfps/scripts/backfill-name.py",
+    )
+
+
+@pytest.fixture
+def expire_cfps():
+    """Load check-cfps/scripts/expire-cfps.py.
+
+    Same CLI shape as `backfill_source`: `--state-path` arg, JSON to
+    stdout. Tests always pass `--today YYYY-MM-DD` so nothing depends
+    on the wall clock (the flag exists for exactly that reason). The
+    module reuses `infer_source` (backfill-source.py) and
+    `_atomic_write` (dedup-by-url.py) via sibling loads."""
+    return _load(
+        "expire_cfps_under_test",
+        "skills/check-cfps/scripts/expire-cfps.py",
     )
 
 
@@ -168,3 +227,49 @@ def apply_sessionize_results():
         "apply_sessionize_results_under_test",
         "skills/check-cfps/scripts/apply-sessionize-results.py",
     )
+
+
+@pytest.fixture
+def verify_sessionize(tmp_path, monkeypatch):
+    """Load check-cfps/scripts/verify-sessionize.py with the run-state dir
+    pinned under tmp_path via `CFP_RUN_STATE_DIR` (where the evidence marker
+    lands). Returns (module, run_dir); the dir is NOT created up front.
+
+    The driver reuses prepare/apply via sibling importlib load, makes the
+    per-slug events call through the module-global `urllib.request.urlopen`
+    (tests monkeypatch it, the check-cfps-fetch idiom), reads
+    `SESSIONIZE_EVENT_API_KEY`/`SESSIONIZE_API_BASE` at main() time, and stamps
+    `run_date` from `module.datetime.now(timezone.utc)` (frozen-subclass
+    monkeypatch to cross a day boundary). Tests drive `module.drive(...)`
+    directly or `module.main([])` with an `io.StringIO` stdin + capsys."""
+    run_dir = tmp_path / "cfp-run"
+    monkeypatch.setenv("CFP_RUN_STATE_DIR", str(run_dir))
+    monkeypatch.delenv("SESSIONIZE_EVENT_API_KEY", raising=False)
+    monkeypatch.delenv("SESSIONIZE_API_BASE", raising=False)
+    module = _load(
+        "verify_sessionize_under_test",
+        "skills/check-cfps/scripts/verify-sessionize.py",
+    )
+    return module, run_dir
+
+
+@pytest.fixture
+def discover_open_cfps(tmp_path, monkeypatch):
+    """Load check-cfps/scripts/discover-open-cfps.py with `CFP_RUN_STATE_DIR`
+    and the Sessionize env cleared. Returns (module, state_path); the state
+    file is NOT created up front so callers choose present/absent.
+
+    Like verify-sessionize, it fetches via the module-global
+    `urllib.request.urlopen` (monkeypatched in tests) and reads
+    `SESSIONIZE_SPEAKER_KEY`/`SESSIONIZE_API_BASE` at main() time. Tests call
+    `module.build_candidates(events, existing_slugs)` directly for the parse,
+    or drive `module.main([...])` with `--state` + capsys for the I/O
+    contract."""
+    state_path = tmp_path / "cfp-state.json"
+    monkeypatch.delenv("SESSIONIZE_SPEAKER_KEY", raising=False)
+    monkeypatch.delenv("SESSIONIZE_API_BASE", raising=False)
+    module = _load(
+        "discover_open_cfps_under_test",
+        "skills/check-cfps/scripts/discover-open-cfps.py",
+    )
+    return module, state_path

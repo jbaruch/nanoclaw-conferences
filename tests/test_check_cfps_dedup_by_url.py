@@ -6,8 +6,15 @@ Locks down the script's documented contract:
     lowercased, trailing `/` stripped, missing/non-string input → None.
   - Winner selection per priority:
       a) `user_actioned: true` (immutability)
-      b) `source` matches URL host (authoritative API row)
-      c) alphabetically-earliest slug (deterministic tiebreak)
+      b) `shown_in_brief: true` (sticky)
+      c) `source` matches URL host (authoritative API row)
+      d) highest-ranking `source` per SOURCE_PRIORITY
+         (javaconferences.org > sessionize-speaker-api >
+         developers.events) — the self-hosted-CFP-URL case (#25)
+      e) alphabetically-earliest slug (deterministic tiebreak)
+  - Field inheritance on merge: winner's missing/empty `name`/`city`/
+    `conf_date` filled from losers; `deadline` never inherited;
+    `user_actioned` winners never mutated (#23/#25).
   - Multiple `user_actioned` entries on one URL → group skipped with
     stderr warning (manual review).
   - bot_notes merge: appended to winner with provenance prefix, only
@@ -145,6 +152,7 @@ def test_missing_state_file_is_no_op_exit_0(dedup_by_url, tmp_path, capsys):
         "groups_merged": 0,
         "slugs_dropped": 0,
         "notes_merged": 0,
+        "fields_inherited": 0,
         "skipped_multi_user_actioned": 0,
         "merges": [],
     }
@@ -154,6 +162,20 @@ def test_missing_state_file_is_no_op_exit_0(dedup_by_url, tmp_path, capsys):
 def test_corrupt_json_exits_1(dedup_by_url, tmp_path, capsys):
     state_path = tmp_path / "cfp-state.json"
     state_path.write_text("{not valid json", encoding="utf-8")
+
+    rc = dedup_by_url.main(["--state-path", str(state_path)])
+    captured = capsys.readouterr()
+
+    assert rc == 1
+    assert "failed to read" in captured.err
+    assert str(state_path) in captured.err
+
+
+def test_invalid_utf8_exits_1(dedup_by_url, tmp_path, capsys):
+    """A state file that is not valid UTF-8 gets the same exit-1 stderr
+    diagnostic as malformed JSON, not an unhandled UnicodeDecodeError."""
+    state_path = tmp_path / "cfp-state.json"
+    state_path.write_bytes(b"\xff\xfe{}")
 
     rc = dedup_by_url.main(["--state-path", str(state_path)])
     captured = capsys.readouterr()
@@ -467,10 +489,271 @@ def test_multiple_user_actioned_on_same_url_skipped(dedup_by_url, tmp_path, caps
     assert "conf-b-2026" in state
 
 
+def test_live_repro_devoxx_morocco_source_priority(dedup_by_url, tmp_path, capsys):
+    """The production shape behind issue #25 (dates shifted to stable
+    past dates per testing-standards — the script never compares them
+    to the clock): the CFP URL is self-hosted (`dvma26.cfp.dev`), so
+    NO source matches the URL host and the old alphabetical tiebreak
+    kept the developers.events stub (which had no `name`), silently
+    dropping the javaconferences.org source tag that drives Tier-1
+    auto-approve. The source-priority tier must keep the
+    javaconferences.org copy — name, source, and all."""
+    state_path = tmp_path / "cfp-state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                # Alphabetically earlier — the old tiebreak's accidental winner.
+                "devoxx-morocco-2024": {
+                    "status": "open",
+                    "deadline": "2024-07-04",
+                    "city": "Casablanca (Morocco)",
+                    "conf_date": "2024-11-03",
+                    "cfp_url": "https://dvma26.cfp.dev",
+                    "source": "developers.events",
+                    "bot_notes": "",
+                    "matched_interests": [],
+                },
+                "devoxx-morocco-jc-2024": {
+                    "status": "open",
+                    "name": "Devoxx Morocco",
+                    "deadline": "2024-07-05",
+                    "city": "Casablanca, Morocco",
+                    "cfp_url": "https://dvma26.cfp.dev/",
+                    "source": "javaconferences.org",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = dedup_by_url.main(["--state-path", str(state_path)])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    payload = _stdout_payload(captured)
+    assert payload["groups_merged"] == 1
+    assert payload["slugs_dropped"] == 1
+
+    state = _read_state(state_path)
+    assert "devoxx-morocco-jc-2024" in state
+    assert "devoxx-morocco-2024" not in state
+    winner = state["devoxx-morocco-jc-2024"]
+    # The priority-bearing attribution and the name both survive.
+    assert winner["source"] == "javaconferences.org"
+    assert winner["name"] == "Devoxx Morocco"
+
+
+def test_source_priority_sessionize_beats_developers_events(dedup_by_url, tmp_path, capsys):
+    """On a self-hosted URL, sessionize-speaker-api outranks
+    developers.events even when the developers.events slug is
+    alphabetically earlier."""
+    state_path = tmp_path / "cfp-state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "aaa-conf-2026": {
+                    "status": "open",
+                    "source": "developers.events",
+                    "cfp_url": "https://cfp.example-conf.io/2026",
+                },
+                "zzz-conf-2026": {
+                    "status": "open",
+                    "source": "sessionize-speaker-api",
+                    "cfp_url": "https://cfp.example-conf.io/2026",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = dedup_by_url.main(["--state-path", str(state_path)])
+    _ = capsys.readouterr()
+
+    assert rc == 0
+    state = _read_state(state_path)
+    assert "zzz-conf-2026" in state
+    assert "aaa-conf-2026" not in state
+
+
+def test_winner_inherits_missing_name_from_loser(dedup_by_url, tmp_path, capsys):
+    """A winner without `name` inherits it (plus other missing
+    metadata) from the loser — the merge must never discard the only
+    copy that carried a name (#23/#25). `deadline` is NOT inherited:
+    the loser's may be stale."""
+    state_path = tmp_path / "cfp-state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                # Sticky → wins despite having no name.
+                "stub-2026": {
+                    "status": "open",
+                    "shown_in_brief": True,
+                    "source": "developers.events",
+                    "cfp_url": "https://sessionize.com/conf-2026",
+                    "deadline": "2024-07-13",
+                    "bot_notes": "sticky reasoning",
+                },
+                "named-2026": {
+                    "status": "open",
+                    "name": "Named Conf",
+                    "city": "Lisbon, Portugal",
+                    "conf_date": "2024-10-01",
+                    "source": "javaconferences.org",
+                    "cfp_url": "https://sessionize.com/conf-2026",
+                    "deadline": "2024-06-30",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = dedup_by_url.main(["--state-path", str(state_path)])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    payload = _stdout_payload(captured)
+    assert payload["fields_inherited"] == 3  # name, city, conf_date
+
+    state = _read_state(state_path)
+    assert "stub-2026" in state
+    assert "named-2026" not in state
+    winner = state["stub-2026"]
+    assert winner["name"] == "Named Conf"
+    assert winner["city"] == "Lisbon, Portugal"
+    assert winner["conf_date"] == "2024-10-01"
+    # Deadline stays the winner's own — never inherited.
+    assert winner["deadline"] == "2024-07-13"
+    # Sticky bot_notes untouched.
+    assert winner["bot_notes"] == "sticky reasoning"
+
+
+def test_winner_existing_fields_not_overwritten_by_loser(dedup_by_url, tmp_path, capsys):
+    """Inheritance only fills gaps — a winner that already carries
+    `name`/`city`/`conf_date` keeps its own values."""
+    state_path = tmp_path / "cfp-state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "winner-2026": {
+                    "status": "open",
+                    "name": "Winner Name",
+                    "city": "Ghent, Belgium",
+                    "source": "sessionize-speaker-api",
+                    "cfp_url": "https://sessionize.com/conf-2026",
+                },
+                "loser-2026": {
+                    "status": "open",
+                    "name": "Loser Name",
+                    "city": "Elsewhere",
+                    "conf_date": "2024-09-09",
+                    "source": "developers.events",
+                    "cfp_url": "https://sessionize.com/conf-2026",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = dedup_by_url.main(["--state-path", str(state_path)])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    payload = _stdout_payload(captured)
+    # Only the missing conf_date is filled.
+    assert payload["fields_inherited"] == 1
+
+    state = _read_state(state_path)
+    winner = state["winner-2026"]
+    assert winner["name"] == "Winner Name"
+    assert winner["city"] == "Ghent, Belgium"
+    assert winner["conf_date"] == "2024-09-09"
+
+
+def test_whitespace_or_junk_winner_fields_still_inherit(dedup_by_url, tmp_path, capsys):
+    """A winner whose `name` is whitespace-only (or non-string schema
+    drift, like a list) is effectively nameless — inheritance must
+    treat it as missing, and must NOT inherit a whitespace-only value
+    from the loser either."""
+    state_path = tmp_path / "cfp-state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "winner-2026": {
+                    "status": "open",
+                    "name": "   ",
+                    "city": ["not", "a", "string"],
+                    "source": "sessionize-speaker-api",
+                    "cfp_url": "https://sessionize.com/conf-2026",
+                },
+                "loser-2026": {
+                    "status": "open",
+                    "name": "Real Name",
+                    "city": "  ",
+                    "source": "developers.events",
+                    "cfp_url": "https://sessionize.com/conf-2026",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = dedup_by_url.main(["--state-path", str(state_path)])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    payload = _stdout_payload(captured)
+    # Only name — the loser's whitespace-only city is not worth inheriting.
+    assert payload["fields_inherited"] == 1
+
+    state = _read_state(state_path)
+    winner = state["winner-2026"]
+    assert winner["name"] == "Real Name"
+    # Junk city untouched (no usable replacement available).
+    assert winner["city"] == ["not", "a", "string"]
+
+
+def test_user_actioned_winner_inherits_nothing(dedup_by_url, tmp_path, capsys):
+    """The immutability invariant extends to field inheritance: a
+    `user_actioned: true` winner is never mutated, even to fill a
+    missing `name`."""
+    state_path = tmp_path / "cfp-state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "actioned-2026": {
+                    "status": "sent",
+                    "user_actioned": True,
+                    "cfp_url": "https://sessionize.com/conf-2026",
+                },
+                "named-2026": {
+                    "status": "open",
+                    "name": "Named Conf",
+                    "source": "sessionize-speaker-api",
+                    "cfp_url": "https://sessionize.com/conf-2026",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    rc = dedup_by_url.main(["--state-path", str(state_path)])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    payload = _stdout_payload(captured)
+    assert payload["fields_inherited"] == 0
+
+    state = _read_state(state_path)
+    assert "actioned-2026" in state
+    assert "named-2026" not in state
+    assert "name" not in state["actioned-2026"]
+
+
 def test_no_source_match_falls_back_to_alphabetical_winner(dedup_by_url, tmp_path, capsys):
-    """No `user_actioned`, no source-host match → the
-    alphabetically-earliest slug wins. Deterministic so the same
-    backfill produces the same result on every run."""
+    """No `user_actioned`, no source-host match, equal source rank
+    (both developers.events) → the alphabetically-earliest slug wins.
+    Deterministic so the same backfill produces the same result on
+    every run."""
     state_path = tmp_path / "cfp-state.json"
     state_path.write_text(
         json.dumps(
@@ -834,7 +1117,13 @@ def test_atomic_write_via_replace(dedup_by_url, tmp_path, capsys, monkeypatch):
     # And after the call no orphan temp file remains.
     final = _read_state(state_path)
     assert "loser-2026" not in final
-    siblings = [p for p in tmp_path.iterdir() if p.name != "cfp-state.json"]
+    siblings = [
+        p
+        for p in tmp_path.iterdir()
+        # The advisory lock file is intentional and persistent (state_lock.py)
+        # — only orphan .tmp files count as atomicity leaks.
+        if p.name not in ("cfp-state.json", "cfp-state.json.lock")
+    ]
     assert siblings == [], f"orphan temp files left behind: {siblings}"
 
 
