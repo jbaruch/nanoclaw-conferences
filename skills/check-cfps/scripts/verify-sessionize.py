@@ -103,7 +103,7 @@ def _load_sibling(name: str, filename: str):
         raise ImportError(
             f"cannot load {filename} from {sibling}: the check-cfps script bundle "
             "looks incomplete — restore the sibling script next to verify-sessionize.py "
-            "(or reinstall the tile) and retry"
+            "(or reinstall the plugin) and retry"
         )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
@@ -152,7 +152,7 @@ def normalize_event(event: dict, slug: str) -> dict:
     """Map a raw Sessionize universal-event payload to the flat shape
     `apply_results` consumes. Direct port of the host's
     `normalizeSessionizeEvent` (src/ipc.ts) so the contract stays identical now
-    that the tile calls the API itself instead of via the MCP tool."""
+    that the plugin calls the API itself instead of via the MCP tool."""
     cfp_dates = _obj(event.get("cfpDates"))
     event_dates = _obj(event.get("eventDates"))
     location = _obj(event.get("location"))

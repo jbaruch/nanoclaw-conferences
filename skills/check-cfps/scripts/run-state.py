@@ -33,6 +33,15 @@ Subcommands:
                  no artifact was saved for that stage.
   done           Remove the run directory (success teardown). Emit
                  {"cleared": true}.
+  invalidate <stage>...
+                 Remove the named stages' artifacts and drop them from
+                 manifest.completed, so a same-day resume re-runs those
+                 steps instead of reloading failed output. Cascades: every
+                 stage completed after the earliest named one is dropped
+                 too (later stages derive from earlier ones). Also accepts
+                 non-manifest markers in the run dir (verify-evidence).
+                 Idempotent — absent stages are reported, not errors.
+                 Emit {"invalidated": [...], "absent": [...]}.
 
 Resume is best-effort, not a correctness requirement: stages are
 idempotent and Step 5 re-verifies the full cohort, so a fresh full run is
@@ -204,6 +213,62 @@ def cmd_load(run_dir: Path, stage: str) -> int:
     return 0
 
 
+def cmd_invalidate(run_dir: Path, stages: list) -> int:
+    """Remove the named stages so a same-day resume re-runs them. Used on
+    verification-gate failure (stamp-last-checked exit 3): keeping `verify`
+    and `working_set` checkpointed would let the retry reload the same
+    failed evidence and repeat the refusal without a new Sessionize call
+    (jbaruch/nanoclaw-conferences#31).
+
+    Cascades downstream: `completed` is completion-ordered and later stages
+    derive from earlier ones, so everything after the earliest named stage
+    is invalidated too — resume means "start at the first stage NOT in
+    completed", and a non-prefix removal would let a stale downstream
+    artifact be treated as current. The manifest rewrite happens BEFORE any
+    unlink: a failed rewrite aborts with the artifacts intact, and a failed
+    unlink afterwards leaves only an orphan file no longer listed in
+    `completed` (harmless — `save` overwrites, `begin`'s reset clears)."""
+    for stage in stages:
+        if not STAGE_RE.match(stage):
+            sys.stderr.write(f"run-state: invalid stage name {stage!r}\n")
+            return 1
+
+    targets = list(dict.fromkeys(stages))
+    manifest = _read_manifest(run_dir)
+    if manifest is not None:
+        completed = manifest.get("completed")
+        if isinstance(completed, list):
+            # Manifest content is data, not trusted input: entries may be
+            # non-string/unhashable (would TypeError on set membership) or
+            # traversal-shaped like "../escape" (must never reach the
+            # unlink below). Gate every element before using it.
+            named = set(targets)
+            named_indexes = [
+                i for i, s in enumerate(completed) if isinstance(s, str) and s in named
+            ]
+            if named_indexes:
+                cut = min(named_indexes)
+                for cascaded in completed[cut:]:
+                    if not isinstance(cascaded, str) or not STAGE_RE.match(cascaded):
+                        continue
+                    if cascaded not in targets:
+                        targets.append(cascaded)
+                manifest["completed"] = completed[:cut]
+                _atomic_write_json(run_dir / MANIFEST_NAME, manifest)
+
+    invalidated = []
+    absent = []
+    for stage in targets:
+        try:
+            (run_dir / f"{stage}.json").unlink()
+            invalidated.append(stage)
+        except FileNotFoundError:
+            absent.append(stage)
+
+    print(json.dumps({"invalidated": invalidated, "absent": absent}))
+    return 0
+
+
 def cmd_done(run_dir: Path) -> int:
     _clear_dir(run_dir)
     if run_dir.exists():
@@ -228,6 +293,8 @@ def main(argv=None) -> int:
     p_load = sub.add_parser("load", help="print a saved stage artifact")
     p_load.add_argument("stage")
     sub.add_parser("done", help="clear the run directory on success")
+    p_inv = sub.add_parser("invalidate", help="remove stages so a resume re-runs them")
+    p_inv.add_argument("stages", nargs="+")
     args = parser.parse_args(argv)
 
     run_dir = _run_dir()
@@ -242,6 +309,8 @@ def main(argv=None) -> int:
             return cmd_save(run_dir, args.stage)
         if args.command == "load":
             return cmd_load(run_dir, args.stage)
+        if args.command == "invalidate":
+            return cmd_invalidate(run_dir, args.stages)
         # `done` — the only remaining branch under a required subparser.
         return cmd_done(run_dir)
     except OSError as exc:
