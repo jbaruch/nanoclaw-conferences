@@ -1,6 +1,6 @@
 {
   "name": "jbaruch/nanoclaw-conferences",
-  "version": "0.1.25",
+  "version": "0.1.26",
   "description": "Finds open conference CFPs relevant to the user across Java/AI/developer conferences, with persistent sent/dismissed/remind state and source-aware Sessionize verification. NanoClaw per-chat overlay, loaded via containerConfig.additionalTiles.",
   "private": false,
   "skills": [
