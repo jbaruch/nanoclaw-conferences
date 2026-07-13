@@ -17,3 +17,18 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "chore(ci)"
+    ignore:
+      # These actions appear ONLY inside the gh-aw-generated
+      # .github/workflows/review-*.lock.yml files (marked "DO NOT EDIT";
+      # compiled from the *.md sources by `gh aw compile`). gh-aw pins them as a
+      # coordinated set per compiler version, so a piecemeal Dependabot bump
+      # diverges from the compiler and is reverted on the next recompile.
+      # Adopt these via a gh-aw compiler upgrade + recompile, not Dependabot.
+      # actions/checkout and tesslio/setup-tessl are intentionally NOT ignored —
+      # they are also used by the hand-written workflows, where bumps are wanted.
+      - dependency-name: "actions/cache*"
+      - dependency-name: "actions/download-artifact"
+      - dependency-name: "actions/github-script"
+      - dependency-name: "actions/setup-node"
+      - dependency-name: "actions/upload-artifact"
+      - dependency-name: "github/gh-aw-actions*"
