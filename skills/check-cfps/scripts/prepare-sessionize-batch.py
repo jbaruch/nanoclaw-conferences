@@ -61,7 +61,7 @@ def _load_infer_source():
         raise ImportError(
             f"cannot load backfill-source.py from {sibling}: the check-cfps script "
             "bundle looks incomplete — restore the sibling script next to "
-            "prepare-sessionize-batch.py (or reinstall the tile) and retry"
+            "prepare-sessionize-batch.py (or reinstall the plugin) and retry"
         )
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

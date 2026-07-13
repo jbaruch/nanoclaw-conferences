@@ -4,7 +4,9 @@ Referenced from `check-cfps` SKILL.md ("State Management"). Full schema lives at
 
 ## Status values
 
-`open`, `approved`, `dismissed`, `conflict`, `sent`, `remind`. User wording like "submitted to [conf]" normalizes to `status: sent`; `submitted` is not a distinct status.
+`open`, `approved`, `dismissed`, `conflict`, `sent`, `remind`, `expired`. User wording like "submitted to [conf]" normalizes to `status: sent`; `submitted` is not a distinct status.
+
+`expired` has a single writer: `scripts/expire-cfps.py` (check-cfps Step 5 pre-verify), which closes out stale non-Sessionize `open`/`approved` rows past their deadline-of-record (jbaruch/nanoclaw-conferences#27); Sessionize rows are instead dismissed by the live-verify "MISSED" path. Expiry overrides `shown_in_brief` stickiness (same basis as the Step 8 confirmed-closed exception) but never touches `user_actioned: true` rows. Revival: `expired` slugs are not hidden by the fetcher's state filter, so a CFP re-listed upstream with an extended deadline re-enters as a candidate and is rewritten from the fresh verdict.
 
 ## Slug format
 
@@ -30,7 +32,7 @@ Record Baruch's dismissal reason in `baruch_notes`. When a deadline expires with
 
 `matched_interests` is an orthogonal axis to `status` (jbaruch/nanoclaw-admin#308). Step 6 judges each `open`/`approved` CFP against the operator-owned priority list and records the matched interest `id`s. The morning brief partitions on this field: a non-empty list OR an absent field → pinned brief; an explicit empty list `[]` → separate non-pinned follow-up. The absent-vs-empty distinction is load-bearing — never normalise absent to `[]`.
 
-Priorities live at `/workspace/group/cfp-priorities.json` — operator-owned, same provenance as `RELEVANCE-CRITERIA.md`, NOT shipped in the tile. The interest taxonomy is data, not code: edit this file to change what's priority (drop Java, add Rust) with no skill or schema change. Each interest carries `id`, `label`, `keywords`, `sources`, and an optional free-text `note`. Shape:
+Priorities live at `/workspace/group/cfp-priorities.json` — operator-owned, same provenance as `RELEVANCE-CRITERIA.md`, NOT shipped in the plugin. The interest taxonomy is data, not code: edit this file to change what's priority (drop Java, add Rust) with no skill or schema change. Each interest carries `id`, `label`, `keywords`, `sources`, and an optional free-text `note`. Shape:
 
 ```json
 {
