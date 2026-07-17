@@ -4,9 +4,7 @@ The check-cfps run is heavy — full-cohort Sessionize verification across every
 
 ## Why a cadence cap
 
-CFP deadlines move on a multi-day horizon, so refreshing `cfp-state.json` periodically rather than daily keeps it current without paying the verification cost every day. The precheck enforces this with a filesystem cursor at `/workspace/group/state/nightly-cfp-sync-cursor.json`. The cap value and the wake/skip predicate are the script's contract — see `scripts/precheck-nightly-cfp-sync.py` (`CADENCE` constant + the cursor-read gate).
-
-The cap sits below the multiple of the daily cron interval that would name the intended cadence, not at it: the cursor stamps at run completion, so a cap at an exact multiple leaves the intended fire a few minutes short and slips the run by a whole day (`jbaruch/nanoclaw#803` / `nanoclaw-admin#353`). The near-miss rationale lives in the precheck's `CADENCE` comment.
+CFP deadlines move on a multi-day horizon, so refreshing `cfp-state.json` periodically rather than daily keeps it current without paying the verification cost every day. The precheck enforces this with a filesystem cursor at `/workspace/group/state/nightly-cfp-sync-cursor.json`. The cap value, the wake/skip predicate, and the reason the cap sits below the cron-interval multiple that names the cadence are the script's contract — see `scripts/precheck-nightly-cfp-sync.py` (`CADENCE` constant + the cursor-read gate) and `jbaruch/nanoclaw#803`.
 
 ## Run ordering vs travel-schedule
 
