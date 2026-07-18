@@ -2,6 +2,12 @@
 
 All notable changes to this plugin are documented here.
 
+## 0.1.30 — 2026-07-17
+
+### Fix — nightly-cfp-sync cadence cap drops below the cron-interval multiple (`jbaruch/nanoclaw#803`)
+
+`precheck-nightly-cfp-sync.py` set `CADENCE = timedelta(days=3)` — an exact multiple of the 24h daily cron interval. The cursor stamps at run *completion*, so the intended every-third-day fire lands ~71.8h later, `age >= CADENCE` fails, and the run slips to every fourth day (live `task_run_logs`: ran 07-11, next 07-15). This is the fleet-wide near-miss `jbaruch/nanoclaw-admin#353`/#354 first fixed elsewhere. The cap drops to `60h`: above the 48h two-day fire so the run isn't every other day, below the 72h near-miss with a half-period of slack that also absorbs the local-TZ cron's DST drift. The `three_day_boundary` test becomes a `three_day_near_miss` regression guard, and the `resting 72h` reference in `SKILL.md` is de-hardcoded per `coding-policy: script-as-black-box`.
+
 ## 0.1.24 — 2026-07-12
 
 ### Changed
