@@ -135,6 +135,33 @@ def test_error_result_is_verify_failed(apply_sessionize_results):
     assert out["summary"]["verify_failed"] == 1
 
 
+def test_removed_event_dismisses_stored_entry_with_removed_note(
+    apply_sessionize_results,
+):
+    # A universal-API 404 (event page taken down) is terminal, not a transient
+    # failure: a stored row is dismissed "REMOVED" so it leaves the verify
+    # cohort instead of re-failing forever (jbaruch/nanoclaw-conferences#66).
+    out = apply_sessionize_results.apply_results(
+        _prep([{"id": "s8", "cohort": "stored", "slug": "gone-conf"}]),
+        [{"slug": "gone-conf", "removed": True}],
+    )
+    (decision,) = out["decisions"]
+    assert decision["action"] == "dismiss"
+    assert decision["bot_notes"] == (
+        "Dismissed: REMOVED — event no longer exists on Sessionize (404). Verified via Sessionize."
+    )
+    assert out["summary"]["dismissed"] == 1
+
+
+def test_removed_event_drops_new_candidate(apply_sessionize_results):
+    out = apply_sessionize_results.apply_results(
+        _prep([{"id": "n8", "cohort": "new", "slug": "gone-conf"}]),
+        [{"slug": "gone-conf", "removed": True}],
+    )
+    assert out["decisions"][0]["action"] == "drop"
+    assert out["summary"]["dropped"] == 1
+
+
 def test_unverifiable_entries_become_verify_failed_keeping_cohort(
     apply_sessionize_results,
 ):

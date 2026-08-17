@@ -19,8 +19,10 @@ Contract under test (matches the host's universal API the tool used to call):
 
 from __future__ import annotations
 
+import email.message
 import io
 import json
+import urllib.error
 
 import pytest
 
@@ -169,6 +171,72 @@ def test_total_outage_marks_all_verify_failed_never_fabricates(verify_sessionize
     ev = out["evidence"]
     assert ev["verified"] == 0 and ev["dismissed"] == 0 and ev["dropped"] == 0
     assert ev["verify_failed"] == 2
+
+
+def _http_error(slug: str, code: int, reason: str) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError(
+        f"{_BASE}/event?slug={slug}", code, reason, email.message.Message(), None
+    )
+
+
+def test_fetch_one_404_returns_removed_signal(verify_sessionize, monkeypatch):
+    # A universal-API 404 means the event page was taken down: fetch surfaces a
+    # distinct terminal `removed` signal, NOT a transient {slug, error}
+    # (jbaruch/nanoclaw-conferences#66).
+    module, _run_dir = verify_sessionize
+    _patch_fetch(monkeypatch, raise_for={"gone": _http_error("gone", 404, "Not Found")})
+
+    assert module.fetch_one(_BASE, "event-key", "gone") == {"slug": "gone", "removed": True}
+
+
+def test_fetch_one_non_404_http_error_stays_transient_error(verify_sessionize, monkeypatch):
+    # Any non-404 HTTP status is a transient failure (the event is not proven
+    # gone) -> {slug, error}, never a `removed` dismissal.
+    module, _run_dir = verify_sessionize
+    _patch_fetch(monkeypatch, raise_for={"blip": _http_error("blip", 500, "Server Error")})
+
+    result = module.fetch_one(_BASE, "event-key", "blip")
+    assert result["slug"] == "blip"
+    assert "error" in result and "removed" not in result
+
+
+def test_removed_event_dismisses_stored_and_counts_as_resolved(verify_sessionize, monkeypatch):
+    # End-to-end: a 404 stored row is dismissed "REMOVED" and leaves the verify
+    # cohort. A dismissal is a live resolution, so evidence counts it under
+    # `dismissed` (which the stamp gate reads as work resolved this run), never
+    # `verify_failed`.
+    module, run_dir = verify_sessionize
+    _patch_fetch(monkeypatch, raise_for={"gone-conf": _http_error("gone-conf", 404, "Not Found")})
+
+    out = _drive(module, [_entry("s1", "gone-conf")], "event-key", run_dir)
+
+    (decision,) = out["decisions"]
+    assert decision["action"] == "dismiss"
+    assert "REMOVED" in decision["bot_notes"]
+    ev = out["evidence"]
+    assert ev["dismissed"] == 1 and ev["verify_failed"] == 0
+    assert ev["live_call"] is True
+    assert _evidence(run_dir)["dismissed"] == 1
+
+
+def test_removed_event_404_drops_new_candidate(verify_sessionize, monkeypatch):
+    module, run_dir = verify_sessionize
+    _patch_fetch(monkeypatch, raise_for={"gone-conf": _http_error("gone-conf", 404, "Not Found")})
+
+    out = _drive(module, [_entry("n1", "gone-conf", cohort="new")], "event-key", run_dir)
+
+    assert out["decisions"][0]["action"] == "drop"
+    assert out["evidence"]["dropped"] == 1
+
+
+def test_non_404_http_error_end_to_end_is_verify_failed(verify_sessionize, monkeypatch):
+    module, run_dir = verify_sessionize
+    _patch_fetch(monkeypatch, raise_for={"blip": _http_error("blip", 503, "Service Unavailable")})
+
+    out = _drive(module, [_entry("s1", "blip")], "event-key", run_dir)
+
+    assert out["decisions"][0]["action"] == "verify_failed"
+    assert out["evidence"]["verify_failed"] == 1 and out["evidence"]["dismissed"] == 0
 
 
 def test_non_object_response_is_verify_failed(verify_sessionize, monkeypatch):

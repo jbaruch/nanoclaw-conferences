@@ -2,6 +2,12 @@
 
 All notable changes to this plugin are documented here.
 
+## 0.1.40 — 2026-08-17
+
+### Fix — removed (404) Sessionize CFP lingers forever as stale (`jbaruch/nanoclaw-conferences#66`)
+
+A Sessionize-sourced `open`/`approved` row whose event page was taken down (universal API returns HTTP 404) got stuck permanently: `verify-sessionize.py` mapped every fetch failure — 404 included — to a transient `{slug, error}`, so `apply-sessionize-results.py` returned `verify_failed`, Step 8 re-flagged `stale: true` with the `⚠️ STALE DATA` prefix, and the row re-entered the verify cohort every run to re-fail and re-warn. `expire-cfps.py` skips Sessionize, and the self-clean path only fires for a *closed* event, never a *removed* one — so the zombie was un-collectable and the `⚠️ check-cfps: N stored CFPs failed Sessionize verification` warning climbed as more events were pulled. Deadline was irrelevant to the trap (`adaptive-organizations-meet-architecture` had a future deadline yet a 404 page). The fetch driver now distinguishes a confirmed-gone event: a 404 from the universal API yields a distinct `{slug, removed: True}` signal (every other HTTP status stays a transient error), and apply routes it to a terminal verdict — dismiss "REMOVED" a stored row, drop a new candidate — so it leaves the verify cohort instead of re-failing forever. A dismissal is a live resolution, so the stamp gate still advances the heartbeat on a run whose only Sessionize work was clearing a removed zombie. `references/contracts.md` now carves 404-removal out of the verification-failure protocol.
+
 ## 0.1.30 — 2026-07-17
 
 ### Fix — nightly-cfp-sync cadence cap drops below the cron-interval multiple (`jbaruch/nanoclaw#803`)

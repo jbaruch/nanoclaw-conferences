@@ -15,7 +15,9 @@ Referenced from `check-cfps` SKILL.md. The skill's write-discipline rules and th
 
 The Step 5 verification-failure protocol applies ONLY to entries with `source == "sessionize-speaker-api"`. Sessionize is the only source whose deadline can move silently after publication, so it is the only source whose live re-verification can fail in a way that needs a stale marker. Non-Sessionize sources (`developers.events`, `javaconferences.org`, or any source whose feed is deadline-of-record) skip Step 5's live API call entirely and never enter this protocol — they get `_verified_this_run: true` set without a network round-trip, and their `last_verified` advances normally in Step 8.
 
-When Step 5 Sessionize verification *fails* for a sessionize-sourced entry (HTTP error, 404, malformed response — not a deliberate skip):
+A **confirmed-removed** event is not a verification failure. When the universal API answers a slug with HTTP 404, its Sessionize page was taken down — a terminal outcome the verify driver flags as `removed`, not a transient error. Step 5 dismisses a stored row with `bot_notes: "Dismissed: REMOVED — event no longer exists on Sessionize (404). Verified via Sessionize."` and drops a new candidate, so the row leaves the verify cohort instead of re-failing every run forever (jbaruch/nanoclaw-conferences#66). Only 404 is terminal; every other HTTP status is a transient failure below.
+
+When Step 5 Sessionize verification *fails* for a sessionize-sourced entry (HTTP error other than 404, timeout, malformed response — not a deliberate skip, not a 404 removal):
 
 - Existing `open`/`approved` entries: set `_verify_failed: true`, persist `stale: true`, and prepend the canonical `⚠️ STALE DATA — Sessionize verification failed on <today>; keeping prior open/approved status until rechecked. ` prefix to `bot_notes` (idempotent — refresh date in place if prefix exists). `last_verified` is NOT touched.
 - New candidates: drop silently from this run's candidate pool — they may re-emerge from the source on the next run.

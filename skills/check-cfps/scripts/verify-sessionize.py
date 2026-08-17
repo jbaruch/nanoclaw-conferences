@@ -52,6 +52,13 @@ Failure handling — never substitute remembered verdicts:
     `last_verified` untouched). A total outage makes every entry verify_failed,
     which the stamp gate reads as "nothing resolved" and refuses to stamp
     clean. Exit 0: the verify_failed decisions ARE the product Step 8 persists.
+  * A slug the universal API answers with HTTP 404 is a confirmed-gone event
+    (its Sessionize page was removed) -> `{slug, removed: True}` -> apply
+    treats it as terminal: dismiss ("REMOVED") a stored row, drop a new
+    candidate. This distinguishes a taken-down event from a transient failure,
+    so a removed CFP leaves the verify cohort instead of re-failing forever
+    (jbaruch/nanoclaw-conferences#66). Only 404 is terminal — every other HTTP
+    status stays a transient `{slug, error}`.
 
 Input (stdin, JSON array) — the cohort to verify, identical to
 prepare-sessionize-batch.py's input:
@@ -188,6 +195,17 @@ def fetch_one(base: str, api_key: str, slug: str) -> dict:
     try:
         with urllib.request.urlopen(request, timeout=HTTP_TIMEOUT) as resp:
             event = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        # A 404 from the universal API is a confirmed-gone event: the slug no
+        # longer resolves, so the Sessionize event page was taken down. That is
+        # terminal, not transient — surface it as a distinct `removed` signal so
+        # apply dismisses the zombie ("REMOVED") instead of re-flagging it stale
+        # every run forever (jbaruch/nanoclaw-conferences#66). Every other HTTP
+        # status (5xx outage, 429, an auth 401/403) stays a transient
+        # {slug, error} -> verify_failed, since the event is not proven gone.
+        if exc.code == 404:
+            return {"slug": slug, "removed": True}
+        return {"slug": slug, "error": f"{type(exc).__name__}: {exc}"}
     except (
         urllib.error.URLError,
         OSError,

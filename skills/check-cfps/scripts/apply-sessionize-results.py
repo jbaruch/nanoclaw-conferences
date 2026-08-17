@@ -9,6 +9,11 @@ entry. The decision logic mirrors the Step 5 contract:
   * result missing for a slug, or `{slug, error}`  -> verify_failed
     (caller applies the verification-failure protocol in
     `references/contracts.md`)
+  * `{slug, removed: True}` (universal API 404 — the event page was taken
+    down)  -> new candidate: drop; stored entry: dismiss "REMOVED". Terminal,
+    so a removed event leaves the verify cohort instead of re-failing forever
+    (jbaruch/nanoclaw-conferences#66) — distinct from the transient
+    `{slug, error}` above.
   * cfp_open is False  -> new candidate: drop; stored entry: dismiss with
     bot_notes "Dismissed: MISSED — CFP closed on <date>. Verified via
     Sessionize." (a closed stored result with no usable cfp_end_local is
@@ -50,10 +55,14 @@ Output (stdout, JSON):
 Exit 0 on success; exit 1 with a stderr diagnostic on malformed input.
 """
 
+import argparse
 import json
 import sys
 
 DISMISS_ONLINE = "Dismissed: online/virtual event."
+DISMISS_REMOVED = (
+    "Dismissed: REMOVED — event no longer exists on Sessionize (404). Verified via Sessionize."
+)
 
 
 def _date10(value: str) -> str:
@@ -71,6 +80,21 @@ def decide(entry: dict, result: dict | None) -> dict:
 
     if result is None or "error" in result:
         return {"id": entry_id, "cohort": cohort, "action": "verify_failed"}
+
+    if result.get("removed") is True:
+        # Confirmed-gone event (universal API 404, flagged by the verify
+        # driver's fetch): terminal, not a transient failure. A new candidate
+        # for a nonexistent event is dropped; a stored row is dismissed
+        # "REMOVED" so it leaves the verify cohort instead of re-failing every
+        # run forever (jbaruch/nanoclaw-conferences#66).
+        if is_new:
+            return {"id": entry_id, "cohort": cohort, "action": "drop"}
+        return {
+            "id": entry_id,
+            "cohort": cohort,
+            "action": "dismiss",
+            "bot_notes": DISMISS_REMOVED,
+        }
 
     if result.get("cfp_open") is False:
         if is_new:
@@ -155,6 +179,12 @@ def apply_results(prep: dict, results: list) -> dict:
 
 
 def main(argv: list[str]) -> int:
+    # The whole input is stdin JSON and there are no flags; parse argv anyway
+    # (matching the sibling scripts' argparse shape) so stray args are rejected
+    # with a usage message instead of silently ignored.
+    argparse.ArgumentParser(
+        description="Apply Sessionize batch results to entries (stdin JSON -> stdout JSON)."
+    ).parse_args(argv)
     raw = sys.stdin.read()
     try:
         payload = json.loads(raw)
