@@ -186,10 +186,12 @@ def normalize_event(event: dict, slug: str) -> dict:
 
 
 def fetch_one(base: str, api_key: str, slug: str) -> dict:
-    """Fetch and normalize one Sessionize event. Any transport/HTTP/decode
-    failure (or a non-object body) is isolated to `{slug, error}` so a single
-    bad slug never sinks the cohort — the host's batch contract. Calls the
-    module-global `urllib.request.urlopen` so tests can monkeypatch it."""
+    """Fetch and normalize one Sessionize event. A universal-API HTTP 404 is a
+    confirmed-gone event, isolated to the terminal `{slug, removed: True}`
+    signal; any other transport/HTTP/decode failure (or a non-object body) is
+    isolated to `{slug, error}` so a single bad slug never sinks the cohort —
+    the host's batch contract. Calls the module-global `urllib.request.urlopen`
+    so tests can monkeypatch it."""
     url = f"{base.rstrip('/')}/event?slug={urllib.parse.quote(slug)}"
     request = urllib.request.Request(url, headers={"X-API-KEY": api_key}, method="GET")
     try:
@@ -203,6 +205,11 @@ def fetch_one(base: str, api_key: str, slug: str) -> dict:
         # every run forever (jbaruch/nanoclaw-conferences#66). Every other HTTP
         # status (5xx outage, 429, an auth 401/403) stays a transient
         # {slug, error} -> verify_failed, since the event is not proven gone.
+        #
+        # Close the error response body so its socket/FD is released promptly
+        # rather than lingering under the bounded-concurrency fan-out; `.code`
+        # and str(exc) stay valid after close.
+        exc.close()
         if exc.code == 404:
             return {"slug": slug, "removed": True}
         return {"slug": slug, "error": f"{type(exc).__name__}: {exc}"}
