@@ -94,3 +94,10 @@ The `nightly-cfp-sync` cadence wrapper carries its own scripts:
 - **V1** — migrated `check-cfps` from `nanoclaw-admin` as a standalone per-chat overlay tile. Full multi-source discovery, source-aware Sessionize verification, AI relevance routing, persistent state with owner-side schema migration, travel-conflict detection, and priority-interest tagging.
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.
+
+## Development dependencies
+
+`tessl.json` declares this repo's dev-time plugin dependencies.
+
+- Every `jbaruch/*` dependency floats at `latest` (Runtime-Managed Manifest Carve-Out, `jbaruch/coding-policy: dependency-management`).
+- `finsi/codex-review` is third-party and pins. No dependency scanner covers the tessl ecosystem. Renewal cadence: quarterly — run `tessl outdated` and bump the pin in its own commit.
