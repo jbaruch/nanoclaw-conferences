@@ -47,3 +47,5 @@ AGENTS.md
 CLAUDE.md
 .github/skills/
 .github/mcp.json
+.github/hooks/
+.cursor/
