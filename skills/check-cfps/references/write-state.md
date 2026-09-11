@@ -22,14 +22,22 @@ Reads newline-separated URLs from stdin; emits `{<input_url>: <existing_slug_or_
 Then apply priority rules (earlier wins):
 
 1. **`user_actioned: true`** — preserve the entry's decision + metadata fields untouched: the bot does not refresh `updated`/`last_verified` (rules 5/6 apply only to entries actively written this run, not to preserved `user_actioned` ones) and does not re-tag `matched_interests`. The ONLY field stamped on these is `schema_version` (owner metadata, rule 10).
-2. **Sticky (`shown_in_brief: true`)** — preserve `status` and the relevance notes in `bot_notes`. Allowed updates: `deadline`, `city`, `conf_date`, `updated`, `last_verified`, `stale` + `⚠️ STALE DATA` prefix. Also apply Step 7's exact-date warning update to the preserved notes, adding one copy or removing that sentence as directed; user-actioned rows remain exempt under rule 1. Exception: Step 5 confirmed closed or online overrides stickiness.
+2. **Sticky (`shown_in_brief: true`)** — preserve `status` and the relevance notes in `bot_notes`. Allowed updates: `deadline`, `city`, `conf_date`, `updated`, `last_verified`, `stale` + `⚠️ STALE DATA` prefix. The helper in item 9 applies the permitted exact-date warning update to these preserved notes. Exception: Step 5 confirmed closed or online overrides stickiness.
 3. **Existing `open`/`approved` without sticky** — update status, `bot_notes`, metadata. Downgrade-to-dismissed MUST set `status: "dismissed"`.
 4. **New entries** — write status and `bot_notes` from Steps 6–7. Inherit `_verified_this_run: true` from Step 5. New entries that fail Sessionize verification are dropped.
 5. Set `updated` to today on every written entry.
 6. Set `last_verified` to today for every `_verified_this_run: true` entry.
 7. `_verify_failed: true` AND status still `open`/`approved`: persist `stale: true` and prepend the canonical stale prefix per `references/contracts.md` (idempotent). Cleared on next successful verification.
 8. Persist `matched_interests` from Step 6 on every `open`/`approved` entry it tagged this run. When Step 6 cleared it (priorities config missing/empty), delete the field from those entries; preserve the prior value untouched on `user_actioned: true` entries.
-9. **Commit through the lock-owning writer — never write cfp-state.json directly.** Pipe the finished working set (JSON object of `slug → record`, `_`-prefixed keys excluded) to the committer, which applies it as per-slug replacements under the shared advisory lock (jbaruch/nanoclaw-conferences#35):
+9. **Commit through the lock-owning writer — never write cfp-state.json directly.** First pass the final working set and exact-date availability judgments to the warning helper after the priority merge above. Use the final deduplicated slugs in both maps. On a resumed write, reassess date availability from the final entries' `conf_date` values.
+
+   ```bash
+   python3 /home/node/.claude/skills/tessl__check-cfps/scripts/update-travel-warnings.py
+   ```
+
+   Stdin: `{"entries": {"<slug>": <record>}, "exact_dates_known": {"<slug>": <boolean>}}`. Supply the judgments required by the helper's docstring. Stdout is the updated `slug → record` working set, with no judgment fields added; the helper owns warning normalization and preservation guards. Exit 1 is invalid input: surface the diagnostic and abort before commit. This helper writes no files.
+
+   Pipe its successful output (`_`-prefixed keys excluded) to the committer, which applies per-slug replacements under the shared advisory lock (jbaruch/nanoclaw-conferences#35):
 
    ```bash
    printf '%s' '<working-set json>' | python3 /home/node/.claude/skills/tessl__check-cfps/scripts/commit-state.py

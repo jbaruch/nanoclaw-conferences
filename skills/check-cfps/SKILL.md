@@ -150,8 +150,10 @@ If the prefilter exits non-zero (malformed config → exit 1, malformed records 
 1. Load `/workspace/group/travel-schedule.json`, extract `type: "Trip"` entries.
 2. For each `open`/`approved` CFP, parse `conf_date`:
    - Parseable range → extract exact start/end.
-   - Month-year, missing, or unparseable dates → interactive runs search for exact dates; scheduled runs use exact dates only when available in fetched metadata. If exact dates remain unknown, ensure `bot_notes` contains one copy of `"Could not verify travel conflict — exact conference dates unknown."`. Remove that sentence when exact dates become available. Preserve every other part of `bot_notes`; never modify `user_actioned` rows.
+   - Month-year, missing, or unparseable dates → interactive runs search for exact dates; scheduled runs use exact dates only when available in fetched metadata.
 3. Overlap with any Trip → `status: "conflict"`, append `"Travel conflict: overlaps with [Trip Name] ([start] – [end])."` to `bot_notes`.
+
+Judge exact-date availability for the warning helper in Step 8. Leave warning-string updates to that helper; retain date interpretation and travel-overlap decisions here.
 
 **Checkpoint:** the working set is now fully decided (verification + relevance + travel applied). `save working_set` (the in-memory entry set) before the Step 8 write — a continuation here reloads it and writes, skipping Steps 2–7.
 

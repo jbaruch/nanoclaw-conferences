@@ -79,6 +79,7 @@ The skill bundle includes deterministic scripts the agent invokes from the SKILL
 - `scripts/match-priorities.py` — deterministic priority-interest prefilter
 - `scripts/dedup-by-url.py` — collapses entries whose `cfp_url` normalises to the same host+path, preserving the highest-priority source attribution and inheriting missing metadata from dropped copies
 - `scripts/commit-state.py` — lock-owning committer for the Step 8 working-set write (the agent never writes `cfp-state.json` directly)
+- `scripts/update-travel-warnings.py` — applies exact-date warning updates to the final working set from the agent's date-availability judgments before commit
 - `scripts/stamp-schema-version.py` — owner-side `schema_version` stamper for `cfp-state.json`
 - `scripts/stamp-last-checked.py` — evidence-gated single writer of the `_last_checked` freshness heartbeat (exit 3 = verification not evidenced)
 - `scripts/run-state.py` — per-run checkpoint store for resumable runs (`begin`/`save`/`load`/`invalidate`/`done`; schema in `references/run-state.md`)
