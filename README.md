@@ -8,7 +8,7 @@ Per-chat overlay tile. Install via NanoClaw's `containerConfig.additionalTiles` 
 
 ## Capabilities
 
-1. **Multi-source discovery** — Sessionize speaker API, `developers.events`, `javaconferences.org`, plus targeted web search for gaps
+1. **Multi-source discovery** — Sessionize speaker API, `developers.events`, `javaconferences.org`, plus targeted web search for gaps in interactive checks
 2. **Source-aware verification** — Sessionize is authority for Sessionize-sourced entries; non-Sessionize feeds are deadline-of-record; batched re-verification per run
 3. **AI relevance analysis** — tiered routing (javaconferences.org auto-approve, blocklist, then AI judgement against the user's speaking topics and relevance criteria)
 4. **Persistent state** — `sent` / `dismissed` / `remind` / `approved` / `conflict` status per CFP in `cfp-state.json`, immutable once the user acts on an entry
@@ -38,7 +38,9 @@ The CFP pipeline calls the Sessionize universal API deterministically from its o
 | `SESSIONIZE_SPEAKER_KEY` | `discover-open-cfps.py` (Step 2) | `X-API-KEY` header to `.../open-cfps` |
 | `SESSIONIZE_EVENT_API_KEY` | `verify-sessionize.py` (Step 5) | `X-API-KEY` header to `.../event?slug=` |
 
-`SESSIONIZE_API_BASE` optionally overrides the `https://sessionize.com/api/universal` base (tests / proxying). These are the same keys the NanoClaw host already holds for its `sessionize_*` tools; the plugin reads them from the injected environment and bundles no secret of its own. Remaining data comes from the host `fetch_markdown` tool and public JSON feeds (`developers.events`, `javaconferences.org`); the `sessionize_*` MCP tools remain available for ad-hoc queries.
+`SESSIONIZE_API_BASE` optionally overrides the `https://sessionize.com/api/universal` base (tests / proxying). The plugin reads keys from the injected environment and bundles no secret of its own. Public JSON feeds supply additional candidates. Interactive checks can use web research and the host `fetch_markdown` tool.
+
+Scheduled syncs use the feed and Sessionize scripts throughout discovery, verification, relevance analysis, and travel checks. They do not discover web-only candidates or research missing metadata. Ambiguous Sessionize topics retain the lean-relevant policy; non-Sessionize candidates without enough topic evidence produce a notice. New uncertain candidates remain unsaved and eligible for later discovery; existing relevance decisions are preserved. Unknown exact conference dates carry a travel-check warning. State writes and the evidence-gated nightly cursor complete in the same invocation.
 
 ## Runtime data
 
@@ -60,7 +62,7 @@ Reads of admin-owned files resolve because admin co-loads with this overlay in t
 | Skill | Description |
 |-------|-------------|
 | [check-cfps](skills/check-cfps/SKILL.md) | Finds open CFPs relevant to the user across Java/AI/developer conferences and maintains persistent CFP state (sent/dismissed/remind) in `cfp-state.json`. Use when the user asks about upcoming conferences, call for papers, speaking opportunities, CFP deadlines, or where to submit a talk proposal. |
-| [nightly-cfp-sync](skills/nightly-cfp-sync/SKILL.md) | Cadence wrapper (cron `30 6`, precheck-gated by a filesystem cadence cursor) that runs `check-cfps` on a schedule, consumes the CFP list internally, and surfaces only a stale-verification notice. Emits the observable-silence cursor marker the silent-success watchdog reads. |
+| [nightly-cfp-sync](skills/nightly-cfp-sync/SKILL.md) | Cadence wrapper (cron `30 6`, precheck-gated by a filesystem cadence cursor) that runs `check-cfps` on a schedule, consumes the CFP list internally, and surfaces verification failures or missing-topic-evidence notices. Emits the observable-silence cursor marker the silent-success watchdog reads. |
 
 ## Skill scripts
 
@@ -77,6 +79,7 @@ The skill bundle includes deterministic scripts the agent invokes from the SKILL
 - `scripts/match-priorities.py` — deterministic priority-interest prefilter
 - `scripts/dedup-by-url.py` — collapses entries whose `cfp_url` normalises to the same host+path, preserving the highest-priority source attribution and inheriting missing metadata from dropped copies
 - `scripts/commit-state.py` — lock-owning committer for the Step 8 working-set write (the agent never writes `cfp-state.json` directly)
+- `scripts/update-travel-warnings.py` — applies exact-date warning updates to the final working set from the agent's date-availability judgments before commit
 - `scripts/stamp-schema-version.py` — owner-side `schema_version` stamper for `cfp-state.json`
 - `scripts/stamp-last-checked.py` — evidence-gated single writer of the `_last_checked` freshness heartbeat (exit 3 = verification not evidenced)
 - `scripts/run-state.py` — per-run checkpoint store for resumable runs (`begin`/`save`/`load`/`invalidate`/`done`; schema in `references/run-state.md`)

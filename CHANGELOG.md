@@ -2,6 +2,14 @@
 
 All notable changes to this plugin are documented here.
 
+## 0.1.45 — 2026-09-11
+
+### Fix — complete scheduled CFP sync without web-tool taint (#73)
+
+The nightly wrapper now explicitly selects scheduled mode in `check-cfps`. That mode uses the existing feed and Sessionize scripts throughout the invocation and excludes web gap search, relevance lookups, and exact-date web research. Previously those tools could taint the turn before the state writes, blocking Bash and leaving `_last_checked` stale; moving only Step 4 would still leave two later research paths and the wrapper's cursor write exposed. Each scheduled invocation invalidates earlier pipeline artifacts and verification evidence before fetching its own cohort, including on same-day retries. Feed warnings cannot activate web fallback; two unusable primary feeds, including malformed responses, produce a technical failure. A denied required tool is a reported technical failure, never a promise to finish on a nonexistent next turn.
+
+Interactive checks retain web research. Scheduled discovery is limited to feed and Sessionize candidates; insufficient topic evidence produces a caller-visible notice without persisting a new dismissal or downgrading an existing decision. Missing or unparseable exact dates receive an idempotent travel warning, including on sticky rows; user-actioned entries remain immutable. A tested `update-travel-warnings.py` helper owns warning normalization from the agent's date-availability judgments and emits the final working set for the locked committer. Verification, locking, heartbeat evidence, and cursor gates remain unchanged. The Step 8 write procedure moves into a required reference to keep the loaded skill compact; its sticky-note merge permits the exact-date warning while preserving relevance notes. The README also drops the obsolete claim that retired Sessionize MCP tools remain available.
+
 ## 0.1.42 — 2026-08-18
 
 ### Chore — commit `tessl.json` as the dependency manifest it is

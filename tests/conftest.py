@@ -61,6 +61,14 @@ def state_lock():
 
 
 @pytest.fixture
+def update_travel_warnings():
+    return _load(
+        "update_travel_warnings_under_test",
+        "skills/check-cfps/scripts/update-travel-warnings.py",
+    )
+
+
+@pytest.fixture
 def commit_state():
     """Load check-cfps/scripts/commit-state.py — the lock-owning Step 8
     committer. Takes the working set as JSON on stdin (patched via
