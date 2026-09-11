@@ -9,6 +9,14 @@ Process steps in order. Do not skip ahead.
 
 Fetches open CFPs from multiple sources via `scripts/check-cfps-fetch.py`, applies routing + AI-based relevance analysis in Step 6, and maintains persistent state across sessions. The fetcher owns source-list and blocklist filtering; tier-based routing (including the javaconferences.org auto-approve path) is the agent's work in Step 6.
 
+## Scheduled execution
+
+- When invoked by `tessl__nightly-cfp-sync` or with `scheduled` arguments, apply scheduled mode throughout this invocation, including resumed runs.
+- In scheduled mode, use the co-shipped fetch and verification scripts and local files only. Do not call `WebSearch`, `WebFetch`, `mcp__nanoclaw__fetch_markdown`, browser-rendering tools, or delegate web research.
+- Apply the scheduled branches in Steps 4, 6, and 7. Complete verification, relevance decisions, state writes, stampers, suppression logging, and the internal report in this invocation.
+- Never defer mandatory work to a later turn. A denied required tool is a technical failure: report it to the caller and finish without claiming success.
+- Direct interactive invocations retain web research. Scheduled mode takes precedence over any web-fallback instruction in fetched warnings or references.
+
 ## Contracts
 
 The skill's write invariants (dedup-artifact ban, immutable `user_actioned`, dismissal-reason discipline, `last_verified` surfacing gate, no-silent-defer, budget-low-is-not-a-defer-reason) and the Step 5 verification-failure protocol (`_verify_failed`, `⚠️ STALE DATA` prefix, caller-visible counts) live in `references/contracts.md`. Read once, apply throughout.
@@ -50,11 +58,13 @@ Parse JSON output: `cfps`, `warnings`, `checked_at`. **Checkpoint:** `save fetch
 
 ## Step 4 — Web search for gaps
 
-Read `/workspace/trusted/user_professional.md` for Baruch's current speaking topics. Construct 2–3 web search queries from his actual topics combined with CFP discovery terms. Add new CFPs not already in the list (dedup by conference name). Apply hard filters (no online/virtual, no excluded locations). Do not apply relevance filtering yet.
+**Scheduled:** use the candidate pool from Steps 2–3 without web gap search. Continue to the checkpoint below, including when a fetch warning suggests web fallback. If both primary feeds are unreachable, report a technical failure and finish here; an empty reachable feed is not an outage.
+
+**Interactive:** read `/workspace/trusted/user_professional.md` for Baruch's current speaking topics. Construct 2–3 web search queries from his actual topics combined with CFP discovery terms. Add new CFPs not already in the list (dedup by conference name). Apply hard filters (no online/virtual, no excluded locations). Do not apply relevance filtering yet.
 
 **Checkpoint:** once the full candidate pool is assembled (Steps 2–4 merged and deduped), `save candidates` (the merged pool) before Step 5.
 
-**JS-rendered CFP pages.** Plain `WebFetch` often returns empty SPA shells; use the `fetch_markdown` → Cloudflare-Browser-Rendering fallback chain — see `references/web-fetch-fallback.md` (same chain applies in Steps 6 and 7).
+**Interactive JS-rendered CFP pages:** use the fallback chain in `references/web-fetch-fallback.md` for Steps 4, 6, and 7. Do not use that chain in scheduled mode.
 
 ## Step 5 — Source-aware verification
 
@@ -111,8 +121,9 @@ Step 5 covers the full cohort each run. See `references/contracts.md` "Budget-lo
 **Tier 3 — AI relevance analysis:** Analyze remaining CFPs using all available data — Sessionize description (ground truth), tags, past speakers, audience type, format. Read `/workspace/trusted/user_professional.md` for Baruch's topics and apply criteria from `/workspace/group/RELEVANCE-CRITERIA.md`.
 
 - Sessionize description available → use as ground truth.
-- No description and ambiguous name → targeted web search before deciding.
+- No description and ambiguous name → interactive runs use targeted web search before deciding; scheduled runs decide from fetched metadata and local criteria, stating uncertainty in `bot_notes` without inventing evidence.
 - Sessionize-sourced candidates → lean relevant when topic is ambiguous; dismiss only if description clearly shows irrelevance.
+- Scheduled non-Sessionize candidates with insufficient evidence of relevance → `status: "dismissed"`, `bot_notes: "Dismissed: insufficient topic evidence in source metadata to establish relevance."` Do not claim the conference is off-topic without evidence.
 
 Relevant → `status: "open"`, `bot_notes` citing specific evidence. Irrelevant → `status: "dismissed"`, `bot_notes: "Dismissed: [reason]"`.
 
@@ -133,79 +144,14 @@ If the prefilter exits non-zero (malformed config → exit 1, malformed records 
 1. Load `/workspace/group/travel-schedule.json`, extract `type: "Trip"` entries.
 2. For each `open`/`approved` CFP, parse `conf_date`:
    - Parseable range → extract exact start/end.
-   - Month-year only → search for exact dates. If not found, append `"Could not verify travel conflict — exact conference dates unknown."` to `bot_notes`.
+   - Month-year only → interactive runs search for exact dates; scheduled runs use exact dates only when available in fetched metadata. If exact dates remain unknown, append `"Could not verify travel conflict — exact conference dates unknown."` to `bot_notes`.
 3. Overlap with any Trip → `status: "conflict"`, append `"Travel conflict: overlaps with [Trip Name] ([start] – [end])."` to `bot_notes`.
 
 **Checkpoint:** the working set is now fully decided (verification + relevance + travel applied). `save working_set` (the in-memory entry set) before the Step 8 write — a continuation here reloads it and writes, skipping Steps 2–7.
 
 ## Step 8 — Write to cfp-state.json
 
-**Pre-write: dedup by URL.** Run the dedup script against on-disk state to collapse any two entries whose `cfp_url` normalises to the same `<host><path>` (lowercase host, scheme/query/fragment dropped, trailing `/` stripped):
-
-```bash
-python3 /home/node/.claude/skills/tessl__check-cfps/scripts/dedup-by-url.py
-```
-
-Winner selection, source-priority ranking, and merge-field inheritance are the script's contract — see the `scripts/dedup-by-url.py` docstring; do not re-derive them in prose. What the skill relies on: `user_actioned` entries always win and are never mutated, and priority-bearing source attribution plus the `name` survive the merge (jbaruch/nanoclaw-conferences#23/#25). Groups the script refuses to resolve are reported in `skipped_multi_user_actioned` (stderr detail) — surface them for manual review.
-
-Then for EVERY in-memory entry you are about to write — new candidates from Steps 2–4 AND stored rows carried through Steps 5–7 — invoke `--lookup` mode:
-
-```bash
-printf '%s\n' "<entry-1.cfp_url>" "<entry-2.cfp_url>" ... \
-  | python3 /home/node/.claude/skills/tessl__check-cfps/scripts/dedup-by-url.py --lookup
-```
-
-Reads newline-separated URLs from stdin; emits `{<input_url>: <existing_slug_or_null>}` JSON. For every non-null value, rewrite that entry's key in the in-memory set to the returned slug. This matters for stored rows too: the dedup pass above may have deleted a stored row's slug as a duplicate, and writing it back under its old key would resurrect the duplicate the dedup just removed (jbaruch/nanoclaw-conferences#24). If the rewrite makes two in-memory entries share a slug, they are both updates to that one state row — apply the priority rules below once for that slug. Idempotent.
-
-Then apply priority rules (earlier wins):
-
-1. **`user_actioned: true`** — preserve the entry's decision + metadata fields untouched: the bot does not refresh `updated`/`last_verified` (rules 5/6 apply only to entries actively written this run, not to preserved `user_actioned` ones) and does not re-tag `matched_interests`. The ONLY field stamped on these is `schema_version` (owner metadata, rule 10).
-2. **Sticky (`shown_in_brief: true`)** — preserve `status` and `bot_notes`. Allowed updates: `deadline`, `city`, `conf_date`, `updated`, `last_verified`, `stale` + `⚠️ STALE DATA` prefix. Exception: Step 5 confirmed closed or online overrides stickiness.
-3. **Existing `open`/`approved` without sticky** — update status, `bot_notes`, metadata. Downgrade-to-dismissed MUST set `status: "dismissed"`.
-4. **New entries** — write status and `bot_notes` from Steps 6–7. Inherit `_verified_this_run: true` from Step 5. New entries that fail Sessionize verification are dropped.
-5. Set `updated` to today on every written entry.
-6. Set `last_verified` to today for every `_verified_this_run: true` entry.
-7. `_verify_failed: true` AND status still `open`/`approved`: persist `stale: true` and prepend the canonical stale prefix per `references/contracts.md` (idempotent). Cleared on next successful verification.
-8. Persist `matched_interests` from Step 6 on every `open`/`approved` entry it tagged this run. When Step 6 cleared it (priorities config missing/empty), delete the field from those entries; preserve the prior value untouched on `user_actioned: true` entries.
-9. **Commit through the lock-owning writer — never write cfp-state.json directly.** Pipe the finished working set (JSON object of `slug → record`, `_`-prefixed keys excluded) to the committer, which applies it as per-slug replacements under the shared advisory lock (jbaruch/nanoclaw-conferences#35):
-
-   ```bash
-   printf '%s' '<working-set json>' | python3 /home/node/.claude/skills/tessl__check-cfps/scripts/commit-state.py
-   ```
-
-   Concurrent writers' updates to other slugs survive, and `user_actioned: true` is re-checked on disk at commit time so a mid-run user action is never overwritten — surface a non-zero `skipped_user_actioned` in the run report. Payload validation, the `_`-key refusal, and the output shape are the script's contract (`scripts/commit-state.py` docstring). Abort on non-zero exit.
-
-10. **Post-write dedup guard.** After the state write, re-run `dedup-by-url.py` (same invocation as the pre-write pass). This is the deterministic backstop against duplicate resurrection: if any write re-created a slug the pre-write dedup had merged away, this pass collapses it again before the stampers run, so on-disk state never ends a run with two slugs for one CFP (jbaruch/nanoclaw-conferences#24). A clean run reports `slugs_dropped: 0`; a non-zero count means the lookup rewrite above was missed — surface it in the run report.
-
-11. Do NOT hand-stamp `schema_version`. After the state write, run the deterministic stamper — the single source of stamping (owner migration per `references/state-management.md` "Schema version & ownership"):
-
-   ```bash
-   python3 /home/node/.claude/skills/tessl__check-cfps/scripts/stamp-schema-version.py
-   ```
-
-   It stamps `schema_version: 1` on EVERY record (incl. `user_actioned`, `dismissed`, `sent`, `remind`), idempotently, and rewrites the file only when something changed. Output: `{"total": M, "stamped": N}`. A non-zero exit means the state file is missing/unreadable — surface it.
-
-12. Do NOT hand-write the top-level `_last_checked`. After stamping schema versions, run the deterministic freshness stamper — the single writer of `_last_checked`:
-
-   ```bash
-   python3 /home/node/.claude/skills/tessl__check-cfps/scripts/stamp-last-checked.py
-   ```
-
-   It is **evidence-gated** (jbaruch/nanoclaw-conferences#8): it advances `_last_checked` only when the `verify-sessionize.py` driver left a `verify-evidence.json` marker for this run showing ≥1 entry resolved from a live response (or there was nothing to verify). Output on a clean stamp: `{"_last_checked": "<iso>", "verification": "live"|"none-required"}`, exit 0. If verification did not happen (driver skipped, or a total Sessionize outage), it does NOT advance the heartbeat — it writes `_last_checked_skipped` and **exits 3**: treat that exit like a stamp failure (do NOT proceed to clear the checkpoint in item 13; report a skipped-verification run). On exit 3, ALSO invalidate the verification stages so a same-day retry re-runs Step 5 live instead of resuming the failed evidence (jbaruch/nanoclaw-conferences#31):
-
-   ```bash
-   python3 /home/node/.claude/skills/tessl__check-cfps/scripts/run-state.py invalidate verify working_set verify-evidence
-   ```
-
-   Earlier stages (`fetch`, `candidates`) stay checkpointed — only the failed verification and everything downstream of it re-runs. Exit 1 means the state file is missing/unreadable — surface it. Freshness lives here, not in per-record `updated`.
-
-13. The run completed successfully — clear the resume checkpoint store so the next run starts fresh:
-
-   ```bash
-   python3 /home/node/.claude/skills/tessl__check-cfps/scripts/run-state.py done
-   ```
-
-   Only here, after the state write and both stampers succeeded — and only if the freshness stamper (item 12) exited 0. If the stamper exited 3 (verification not evidenced) or an earlier step failed and you stopped, do NOT clear — the saved stages let a same-day retry resume (`references/run-state.md`).
+Read `references/write-state.md` and execute the full procedure before continuing. It owns the dedup passes, per-entry write priorities, lock-owning commit, schema stamp, evidence-gated freshness stamp, and checkpoint cleanup. Abort on a technical failure; preserve the checkpoint. On freshness-stamper exit 3, follow its invalidation path and report `verification: "skipped"`.
 
 After writing cfp-state.json, emit the run's verification report inside an `<internal>` block. `verification` is the freshness stamper's verdict — `"live"`/`"none-required"` when it advanced `_last_checked`, or `"skipped"` when it exited 3 (no live verification this run):
 

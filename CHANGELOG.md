@@ -2,6 +2,14 @@
 
 All notable changes to this plugin are documented here.
 
+## 0.1.45 — 2026-09-11
+
+### Fix — complete scheduled CFP sync without web-tool taint (#73)
+
+The nightly wrapper now explicitly selects scheduled mode in `check-cfps`. That mode uses the existing feed and Sessionize scripts throughout the invocation and excludes web gap search, relevance lookups, and exact-date web research. Previously those tools could taint the turn before the state writes, blocking Bash and leaving `_last_checked` stale; moving only Step 4 would still leave two later research paths and the wrapper's cursor write exposed. Scheduled mode also covers resumed stages and feed warnings that recommend web fallback. A denied required tool is a reported technical failure, never a promise to finish on a nonexistent next turn.
+
+Interactive checks retain web research. Scheduled discovery is limited to feed and Sessionize candidates; insufficient topic evidence is recorded explicitly, and unavailable exact dates retain the existing travel-warning path. Verification, locking, heartbeat evidence, and cursor gates remain unchanged. The unchanged Step 8 write procedure moves into a required reference to keep the loaded skill compact. The README also drops the obsolete claim that retired Sessionize MCP tools remain available.
+
 ## 0.1.42 — 2026-08-18
 
 ### Chore — commit `tessl.json` as the dependency manifest it is
