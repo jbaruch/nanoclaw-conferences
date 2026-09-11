@@ -32,6 +32,12 @@ python3 /home/node/.claude/skills/tessl__check-cfps/scripts/run-state.py begin
 - `{"resume": false}` — fresh run. Proceed from Step 2.
 - `{"resume": true, "completed": [...]}` — a run begun earlier today was interrupted. For each stage already in `completed`, reload its artifact with `run-state.py load <stage>` instead of recomputing it, and resume at the first step whose stage is absent.
 
+**Scheduled override:** after `begin`, invalidate prior pipeline artifacts, ignore its saved `completed` list, and proceed from Step 2. Abort on a non-zero exit. Initialize this invocation's `research_warnings` to an empty array.
+
+```bash
+python3 /home/node/.claude/skills/tessl__check-cfps/scripts/run-state.py invalidate fetch candidates verify working_set verify-evidence
+```
+
 Stages, in pipeline order: `fetch` (Step 3), `candidates` (Steps 2–4 merge), `verify` (Step 5 driver), `working_set` (Steps 5–7, ready for Step 8). After producing each stage's artifact, persist it:
 
 ```bash
@@ -58,7 +64,7 @@ Parse JSON output: `cfps`, `warnings`, `checked_at`. **Checkpoint:** `save fetch
 
 ## Step 4 — Web search for gaps
 
-**Scheduled:** use the candidate pool from Steps 2–3 without web gap search. Continue to the checkpoint below, including when a fetch warning suggests web fallback. If both primary feeds are unreachable, report a technical failure and finish here; an empty reachable feed is not an outage.
+**Scheduled:** use the candidate pool from Steps 2–3 without web gap search. Continue to the checkpoint below, including when a fetch warning suggests web fallback. If both primary feeds report fetch or format failures, report a technical failure and finish here; an empty valid feed is not a failure.
 
 **Interactive:** read `/workspace/trusted/user_professional.md` for Baruch's current speaking topics. Construct 2–3 web search queries from his actual topics combined with CFP discovery terms. Add new CFPs not already in the list (dedup by conference name). Apply hard filters (no online/virtual, no excluded locations). Do not apply relevance filtering yet.
 
@@ -123,7 +129,7 @@ Step 5 covers the full cohort each run. See `references/contracts.md` "Budget-lo
 - Sessionize description available → use as ground truth.
 - No description and ambiguous name → interactive runs use targeted web search before deciding; scheduled runs decide from fetched metadata and local criteria, stating uncertainty in `bot_notes` without inventing evidence.
 - Sessionize-sourced candidates → lean relevant when topic is ambiguous; dismiss only if description clearly shows irrelevance.
-- Scheduled non-Sessionize candidates with insufficient evidence of relevance → `status: "dismissed"`, `bot_notes: "Dismissed: insufficient topic evidence in source metadata to establish relevance."` Do not claim the conference is off-topic without evidence.
+- Scheduled non-Sessionize candidates with insufficient topic evidence → record the name and uncertainty in `research_warnings`. For a new candidate, omit it from the state write without persisting a dismissal; keep it eligible for later discovery. For an existing row, preserve its prior relevance decision and notes while applying this run's verified metadata and travel result. Missing evidence alone never justifies a downgrade. Do not claim the conference is off-topic without evidence.
 
 Relevant → `status: "open"`, `bot_notes` citing specific evidence. Irrelevant → `status: "dismissed"`, `bot_notes: "Dismissed: [reason]"`.
 
@@ -144,22 +150,30 @@ If the prefilter exits non-zero (malformed config → exit 1, malformed records 
 1. Load `/workspace/group/travel-schedule.json`, extract `type: "Trip"` entries.
 2. For each `open`/`approved` CFP, parse `conf_date`:
    - Parseable range → extract exact start/end.
-   - Month-year only → interactive runs search for exact dates; scheduled runs use exact dates only when available in fetched metadata. If exact dates remain unknown, append `"Could not verify travel conflict — exact conference dates unknown."` to `bot_notes`.
+   - Month-year, missing, or unparseable dates → interactive runs search for exact dates; scheduled runs use exact dates only when available in fetched metadata. If exact dates remain unknown, ensure `bot_notes` contains one copy of `"Could not verify travel conflict — exact conference dates unknown."`. Remove that sentence when exact dates become available. Preserve every other part of `bot_notes`; never modify `user_actioned` rows.
 3. Overlap with any Trip → `status: "conflict"`, append `"Travel conflict: overlaps with [Trip Name] ([start] – [end])."` to `bot_notes`.
 
 **Checkpoint:** the working set is now fully decided (verification + relevance + travel applied). `save working_set` (the in-memory entry set) before the Step 8 write — a continuation here reloads it and writes, skipping Steps 2–7.
 
 ## Step 8 — Write to cfp-state.json
 
-Read `references/write-state.md` and execute the full procedure before continuing. It owns the dedup passes, per-entry write priorities, lock-owning commit, schema stamp, evidence-gated freshness stamp, and checkpoint cleanup. Abort on a technical failure; preserve the checkpoint. On freshness-stamper exit 3, follow its invalidation path and report `verification: "skipped"`.
+Read and execute the full procedure at this path before continuing:
+
+```text
+skills/check-cfps/references/write-state.md
+```
+
+Resolve it as `references/write-state.md` relative to this installed skill. It owns the dedup passes, per-entry write priorities, lock-owning commit, schema stamp, evidence-gated freshness stamp, and checkpoint cleanup. Abort on a technical failure; preserve the checkpoint. On freshness-stamper exit 3, follow its invalidation path and report `verification: "skipped"`.
 
 After writing cfp-state.json, emit the run's verification report inside an `<internal>` block. `verification` is the freshness stamper's verdict — `"live"`/`"none-required"` when it advanced `_last_checked`, or `"skipped"` when it exited 3 (no live verification this run):
 
 ```
 <internal>
-{"checked_at": "<ISO>", "new_candidates_added": N, "existing_verified": N, "existing_verify_failed": N, "verification": "live"|"none-required"|"skipped"}
+{"checked_at": "<ISO>", "new_candidates_added": N, "existing_verified": N, "existing_verify_failed": N, "verification": "live"|"none-required"|"skipped", "research_warnings": ["<candidate name: missing topic evidence>"]}
 </internal>
 ```
+
+`research_warnings` is empty when no candidate lacks topic evidence. It is a run-report field, never a persisted CFP field. Surface non-empty warnings in the output; the scheduled caller consumes them as specified in its own skill.
 
 ## Step 9 — Sort and format output
 

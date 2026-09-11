@@ -40,7 +40,7 @@ The CFP pipeline calls the Sessionize universal API deterministically from its o
 
 `SESSIONIZE_API_BASE` optionally overrides the `https://sessionize.com/api/universal` base (tests / proxying). The plugin reads keys from the injected environment and bundles no secret of its own. Public JSON feeds supply additional candidates. Interactive checks can use web research and the host `fetch_markdown` tool.
 
-Scheduled syncs use the feed and Sessionize scripts throughout discovery, verification, relevance analysis, and travel checks. They do not discover web-only candidates or research missing metadata. Ambiguous Sessionize topics retain the lean-relevant policy; non-Sessionize candidates without enough topic evidence are dismissed with an explicit reason. Unknown exact conference dates carry a travel-check warning. State writes and the evidence-gated nightly cursor complete in the same invocation.
+Scheduled syncs use the feed and Sessionize scripts throughout discovery, verification, relevance analysis, and travel checks. They do not discover web-only candidates or research missing metadata. Ambiguous Sessionize topics retain the lean-relevant policy; non-Sessionize candidates without enough topic evidence produce a notice. New uncertain candidates remain unsaved and eligible for later discovery; existing relevance decisions are preserved. Unknown exact conference dates carry a travel-check warning. State writes and the evidence-gated nightly cursor complete in the same invocation.
 
 ## Runtime data
 
@@ -62,7 +62,7 @@ Reads of admin-owned files resolve because admin co-loads with this overlay in t
 | Skill | Description |
 |-------|-------------|
 | [check-cfps](skills/check-cfps/SKILL.md) | Finds open CFPs relevant to the user across Java/AI/developer conferences and maintains persistent CFP state (sent/dismissed/remind) in `cfp-state.json`. Use when the user asks about upcoming conferences, call for papers, speaking opportunities, CFP deadlines, or where to submit a talk proposal. |
-| [nightly-cfp-sync](skills/nightly-cfp-sync/SKILL.md) | Cadence wrapper (cron `30 6`, precheck-gated by a filesystem cadence cursor) that runs `check-cfps` on a schedule, consumes the CFP list internally, and surfaces only a stale-verification notice. Emits the observable-silence cursor marker the silent-success watchdog reads. |
+| [nightly-cfp-sync](skills/nightly-cfp-sync/SKILL.md) | Cadence wrapper (cron `30 6`, precheck-gated by a filesystem cadence cursor) that runs `check-cfps` on a schedule, consumes the CFP list internally, and surfaces verification failures or missing-topic-evidence notices. Emits the observable-silence cursor marker the silent-success watchdog reads. |
 
 ## Skill scripts
 

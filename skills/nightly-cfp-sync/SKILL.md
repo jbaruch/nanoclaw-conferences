@@ -14,7 +14,7 @@ evidence: "cfp-state.json#_last_checked"
 
 Process steps in order. Do not skip ahead.
 
-Run this wrapper silently. It consumes the inner skill's CFP list internally and surfaces only a stale-verification notice; the wrapper otherwise adds only cadence-cursor management and the observable-silence marker the silent-success watchdog reads from `task_run_logs.result`.
+Run this wrapper silently. It consumes the inner skill's CFP list internally and surfaces only verification failures or missing-topic-evidence notices; the wrapper otherwise adds only cadence-cursor management and the observable-silence marker the silent-success watchdog reads from `task_run_logs.result`.
 
 The fire-time precheck (`scripts/precheck-nightly-cfp-sync.py`) gates wake-ups by a filesystem cadence cap — the cap value and the wake/skip predicate are the script's contract (`CADENCE` constant). Design rationale in `references/cadence-rationale.md`.
 
@@ -34,9 +34,11 @@ Keep scheduled mode active through the entire inner invocation, including resume
 
 Consume the formatted CFP list internally — do not forward it to Baruch. The skill emits a machine-readable `<internal>` block at the end with `{checked_at, new_candidates_added, existing_verified, existing_verify_failed, verification}`. Parse that JSON. If `existing_verify_failed > 0`, forward a short notice via `mcp__nanoclaw__send_message` (e.g. `"check-cfps: <N> stored CFPs failed Sessionize verification this run; bot_notes prefixed with ⚠️ STALE DATA. Will retry next cycle."`). That notice drives the `surfaced` word in Step 3.
 
+Also read `research_warnings` from that report, defaulting to an empty array when absent. If non-empty, send one short notice via `mcp__nanoclaw__send_message` naming the affected CFPs and the missing topic evidence. State that new uncertain candidates were not saved and existing decisions were preserved. This notice also selects `surfaced` in Step 3.
+
 `verification` reports whether the run actually re-verified the Sessionize cohort (jbaruch/nanoclaw-conferences#8): `"live"` or `"none-required"` means it did (or had nothing to verify) — proceed normally. `"skipped"` means the freshness heartbeat did NOT advance (the verify driver was skipped or Sessionize was fully unreachable), so the run is NOT a clean success: notify Baruch via `mcp__nanoclaw__send_message` (e.g. `"check-cfps: Sessionize verification did not run this cycle (heartbeat held); will retry next fire."`), do NOT stamp the cursor (so the next cadence fire retries sooner instead of resting a full cadence-cap window on an unverified run), emit `<internal>nightly-cfp-sync exited: verify-skipped</internal>` as your final turn text, and finish here.
 
-On *technical* failure (including both primary sources unreachable or a required tool denied), notify Baruch via `mcp__nanoclaw__send_message`, do NOT stamp the cursor — emit `<internal>nightly-cfp-sync exited: inner-skill-fail</internal>` as your final turn text and finish here. The next cadence fire retries.
+On *technical* failure (including both primary feeds reporting fetch or format failures, or a required tool denied), notify Baruch via `mcp__nanoclaw__send_message`, do NOT stamp the cursor — emit `<internal>nightly-cfp-sync exited: inner-skill-fail</internal>` as your final turn text and finish here. The next cadence fire retries.
 
 ## Step 2 — Advance the success cursor
 
@@ -56,4 +58,4 @@ Handle the exit code:
 
 ## Step 3 — Observable-silence marker
 
-Your entire final turn is EXACTLY the one `<internal>` line below — no preceding prose, status report, or narration of Steps 1-2 (the optional Step 1 stale-verification notice was already sent separately). This is the marker the silent-success watchdog reads from `task_run_logs.result` to tell healthy quiet from broken-silently runs: `<internal>nightly-cfp-sync ran <slot_key>: clean</internal>` when Step 1 forwarded no stale-verification notice, or `<internal>nightly-cfp-sync ran <slot_key>: surfaced</internal>` when it did. `<slot_key>` is today's UTC date in `YYYY-MM-DD` form. Finish here.
+Your entire final turn is EXACTLY the one `<internal>` line below — no preceding prose, status report, or narration of Steps 1-2 (any Step 1 notices were already sent separately). This is the marker the silent-success watchdog reads from `task_run_logs.result` to tell healthy quiet from broken-silently runs: `<internal>nightly-cfp-sync ran <slot_key>: clean</internal>` when Step 1 forwarded no notice, or `<internal>nightly-cfp-sync ran <slot_key>: surfaced</internal>` when it did. `<slot_key>` is today's UTC date in `YYYY-MM-DD` form. Finish here.
