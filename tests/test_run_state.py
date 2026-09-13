@@ -227,6 +227,34 @@ def test_begin_upgrade_keeps_stages_untouched_by_the_shape_change(run_state, mon
     assert (run_dir / "candidates.json").exists()
 
 
+def test_begin_rejects_a_non_integer_schema_version(run_state, monkeypatch, capsys):
+    """`True == 1` and `2.0 == 2` in Python, so a bare equality test would let
+    `true` enter the v1 upgrade path (preserving completed stages) and `2.0`
+    pass as current. Both are malformed manifests and must reset."""
+    module, run_dir = run_state
+    day = datetime(2026, 6, 15, 9, 0, 0, tzinfo=timezone.utc)
+    _freeze(module, monkeypatch, day)
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    for bogus in (True, float(module.SCHEMA_VERSION), "2"):
+        (run_dir / "manifest.json").write_text(
+            json.dumps(
+                {"schema_version": bogus, "run_date": "2026-06-15", "completed": ["candidates"]}
+            ),
+            encoding="utf-8",
+        )
+        (run_dir / "candidates.json").write_text(json.dumps({"pool": []}), encoding="utf-8")
+
+        rc = module.main(["begin"])
+        out = _out(capsys)
+
+        assert rc == 0, bogus
+        assert out["resume"] is False, bogus
+        assert out["completed"] == [], bogus
+        assert _manifest(run_dir)["schema_version"] == module.SCHEMA_VERSION, bogus
+        assert not (run_dir / "candidates.json").exists(), bogus
+
+
 def test_load_absent_stage_exits_2(run_state, capsys):
     module, _ = run_state
     module.main(["begin"])

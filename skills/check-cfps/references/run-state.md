@@ -36,7 +36,7 @@ cfp-run/
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `schema_version` | integer | yes | Currently `2` — `1` predates the `fetch` artifact carrying `sources` and `feed_failure`. Bump on shape change. `begin` resumes only when this equals the supported version; a mismatch (future/partial shape) is treated as no usable prior run and resets. |
+| `schema_version` | integer | yes | Currently `2` — `1` predates the `fetch` artifact carrying `sources` and `feed_failure`. Bump on shape change. `begin` upgrades a recognized older version in place (see Migration policy); a version it cannot upgrade — newer, or a non-integer partial write — is treated as no usable prior run and resets. |
 | `run_date` | string | yes | UTC date (`YYYY-MM-DD`) the run began. `begin` resumes only when this equals today; otherwise it resets. |
 | `completed` | string[] | yes | Stage names saved so far, in completion order, deduped. |
 
@@ -82,7 +82,7 @@ python3 .../run-state.py invalidate verify working_set verify-evidence
 
 ## Lifecycle
 
-- **Fresh run** — `begin` finds no usable manifest (absent, unreadable, stale `run_date`, or unsupported `schema_version`), clears any leftover files, writes a fresh manifest, returns `resume: false`. The agent runs Steps 2–8, calling `save <stage>` as each artifact appears.
+- **Fresh run** — `begin` finds no usable manifest (absent, unreadable, stale `run_date`, or a `schema_version` it cannot upgrade), clears any leftover files, writes a fresh manifest, returns `resume: false`. The agent runs Steps 2–8, calling `save <stage>` as each artifact appears.
 - **Resumed run** — a token-limit continuation re-invokes the skill; `begin` finds today's manifest and returns `resume: true` with `completed`. The agent `load`s each completed stage instead of recomputing it and resumes at the first uncompleted stage.
 - **Scheduled invocation** — after `begin`, invalidate the prior pipeline stages and verification marker using SKILL.md Step 1's scheduled override. Restart at Step 2 regardless of `completed`; each scheduled invocation fetches, verifies, and judges its own cohort. This also discards incomplete interactive artifacts and prevents an earlier same-day evidence marker from freshening a new scheduled run. Checkpoint contents never authorize web research or promise a continuation turn.
 - **Success** — Step 8 finishes the state write and stampers, then calls `done` to remove the directory. The next run starts clean.

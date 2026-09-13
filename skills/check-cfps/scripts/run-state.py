@@ -162,6 +162,20 @@ def _truncate_at_stage(manifest: dict, stage: str) -> list:
     return stale
 
 
+def _schema_version(manifest: dict):
+    """Return the manifest's `schema_version` as an int, or None when it is
+    not a JSON integer.
+
+    Equality alone is not enough: `True == 1` and `2.0 == 2` in Python, so a
+    manifest carrying `true` would enter the v1 upgrade step and one carrying
+    `2.0` would pass as current — both bypassing the reset a malformed
+    manifest is supposed to get."""
+    version = manifest.get("schema_version")
+    if isinstance(version, bool) or not isinstance(version, int):
+        return None
+    return version
+
+
 def _migrate_manifest(manifest: dict) -> tuple:
     """Upgrade an older manifest to SCHEMA_VERSION.
 
@@ -180,7 +194,7 @@ def _migrate_manifest(manifest: dict) -> tuple:
     and cannot satisfy a reader that expects them."""
     upgraded = dict(manifest)
     stale: list = []
-    version = upgraded.get("schema_version")
+    version = _schema_version(upgraded)
 
     if version == 1:
         stale = _truncate_at_stage(upgraded, "fetch")

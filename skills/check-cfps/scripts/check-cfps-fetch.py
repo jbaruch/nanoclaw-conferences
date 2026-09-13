@@ -246,10 +246,13 @@ def fetch_developers_events(warnings: list) -> tuple[list, dict]:
 
     for entry in data:
         try:
-            until_ms = entry.get("untilDate", 0)
             # A missing or non-numeric deadline is a shape failure; a real
             # timestamp in the past is a closed CFP, which is a normal drop.
-            if not isinstance(until_ms, (int, float)) or isinstance(until_ms, bool) or not until_ms:
+            # Presence and type decide that, never truthiness: epoch `0` is a
+            # perfectly numeric timestamp (1970) and belongs in the filtered
+            # count, not in the one that can escalate to `feed_failure`.
+            until_ms = entry.get("untilDate")
+            if not isinstance(until_ms, (int, float)) or isinstance(until_ms, bool):
                 counts["malformed"] += 1
                 sys.stderr.write(
                     f"check-cfps-fetch: source A entry has no usable untilDate ({until_ms!r})\n"

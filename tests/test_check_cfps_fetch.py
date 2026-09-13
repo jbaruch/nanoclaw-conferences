@@ -840,6 +840,29 @@ def test_oversized_integer_literal_is_a_format_failure(check_cfps_fetch, monkeyp
     assert payload["feed_failure"] is False
 
 
+def test_zero_epoch_deadline_is_filtered_not_malformed(check_cfps_fetch, monkeypatch, capsys):
+    """`untilDate: 0` is a numeric timestamp (1970) and so a closed CFP.
+    Testing truthiness instead of presence counted it malformed, which could
+    push an otherwise filtered source to `all_malformed` and `feed_failure`."""
+    module, _, _ = check_cfps_fetch
+    zero: dict = _src_a_entry("EpochConf 2026", _FROZEN_TODAY + timedelta(days=20))
+    zero["untilDate"] = 0
+    missing: dict = _src_a_entry("NoDeadlineConf 2026", _FROZEN_TODAY + timedelta(days=20))
+    del missing["untilDate"]
+    _patch_urlopen(monkeypatch, source_a=[zero, missing], source_b=[])
+
+    _, out, _ = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert _health(payload, "developers.events") == {
+        "status": "all_malformed",
+        "records_received": 2,
+        "records_usable": 0,
+        "records_malformed": 1,
+        "records_filtered": 1,
+    }
+
+
 def test_every_source_failed_sets_feed_failure(check_cfps_fetch, monkeypatch, capsys):
     """Source A unreachable and Source B all-malformed → `feed_failure` true,
     the single branch point the scheduled technical-failure path reads."""
