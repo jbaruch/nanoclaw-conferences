@@ -844,6 +844,23 @@ def test_non_string_location_is_counted_not_fatal(check_cfps_fetch, monkeypatch,
     assert "non-string locationName" in err
 
 
+def test_one_source_down_one_validly_empty_does_not_claim_emptiness(
+    check_cfps_fetch, monkeypatch, capsys
+):
+    """The mixed case: a source that never answered is not a source that
+    returned empty. The fallback warning still fires (no usable CFPs, and this
+    is not a technical failure) but does not claim both feeds were empty."""
+    module, _, _ = check_cfps_fetch
+    _patch_urlopen(monkeypatch, source_a=ConnectionError("boom"), source_b=[])
+
+    _, out, _ = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert payload["feed_failure"] is False
+    assert any("No usable CFPs from the primary sources" in w for w in payload["warnings"])
+    assert not any("Both primary sources returned empty" in w for w in payload["warnings"])
+
+
 def test_feed_failure_suppresses_the_web_fallback_warning(check_cfps_fetch, monkeypatch, capsys):
     """Every feed failed technically → no "web search fallback needed": that
     wording would make a format outage read as a normal empty result. The

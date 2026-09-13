@@ -38,7 +38,7 @@ Also read `research_warnings` from that report, defaulting to an empty array whe
 
 `verification` reports whether the run actually re-verified the Sessionize cohort (jbaruch/nanoclaw-conferences#8): `"live"` or `"none-required"` means it did (or had nothing to verify) — proceed normally. `"skipped"` means the freshness heartbeat did NOT advance (the verify driver was skipped or Sessionize was fully unreachable), so the run is NOT a clean success: notify Baruch via `mcp__nanoclaw__send_message` (e.g. `"check-cfps: Sessionize verification did not run this cycle (heartbeat held); will retry next fire."`), do NOT stamp the cursor (so the next cadence fire retries sooner instead of resting a full cadence-cap window on an unverified run), emit `<internal>nightly-cfp-sync exited: verify-skipped</internal>` as your final turn text, and finish here.
 
-On *technical* failure (including both primary feeds reporting fetch or format failures, or a required tool denied), notify Baruch via `mcp__nanoclaw__send_message`, do NOT stamp the cursor — emit `<internal>nightly-cfp-sync exited: inner-skill-fail</internal>` as your final turn text and finish here. The next cadence fire retries.
+On *technical* failure (the fetch script's `feed_failure` flag, or a required tool denied), notify Baruch via `mcp__nanoclaw__send_message`, do NOT stamp the cursor — emit `<internal>nightly-cfp-sync exited: inner-skill-fail</internal>` as your final turn text and finish here. The next cadence fire retries.
 
 ## Step 2 — Advance the success cursor
 

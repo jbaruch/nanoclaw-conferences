@@ -615,8 +615,11 @@ def main():
     # feed failed technically would dress a format outage up as a normal empty
     # result — the exact conflation the per-source health exists to end. The
     # unreachable / all-malformed warnings already name what went wrong.
+    # The wording says "no usable CFPs", not "both sources returned empty":
+    # one source can be down while the other is validly empty, and claiming
+    # emptiness for a source that never answered is its own small lie.
     if not all_cfps and not feed_failure:
-        warnings.append("Both primary sources returned empty — web search fallback needed")
+        warnings.append("No usable CFPs from the primary sources — web search fallback needed")
 
     # Load supporting data
     trips = load_travel_schedule(warnings)
