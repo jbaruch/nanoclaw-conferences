@@ -757,6 +757,69 @@ def test_partially_usable_feed_keeps_its_usable_records(check_cfps_fetch, monkey
     assert payload["feed_failure"] is False
 
 
+def test_null_cfp_link_is_filtered_not_malformed(check_cfps_fetch, monkeypatch, capsys):
+    """A JSON `null` cfpLink is the same "no CFP open" case as a missing one.
+    Stripping it blind would count the record malformed and let a healthy feed
+    of link-less conferences escalate to `feed_failure`."""
+    module, _, _ = check_cfps_fetch
+    null_link: dict = _src_b_entry(
+        "NoLinkConf 2026", (_FROZEN_TODAY + timedelta(days=30)).isoformat()
+    )
+    null_link["cfpLink"] = None
+    bad_link: dict = _src_b_entry(
+        "BadLinkConf 2026", (_FROZEN_TODAY + timedelta(days=30)).isoformat()
+    )
+    bad_link["cfpLink"] = 7
+    _patch_urlopen(monkeypatch, source_a=[], source_b=[null_link, bad_link])
+
+    _, out, err = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert _health(payload, "javaconferences.org") == {
+        "status": "all_malformed",
+        "records_received": 2,
+        "records_usable": 0,
+        "records_malformed": 1,
+        "records_filtered": 1,
+    }
+    assert "non-string cfpLink" in err
+
+
+def test_all_null_cfp_links_stay_a_filtered_feed(check_cfps_fetch, monkeypatch, capsys):
+    """The escalation the previous test guards against, end to end: every
+    entry link-less via `null` is a `filtered` feed, never `feed_failure`."""
+    module, _, _ = check_cfps_fetch
+    entries = []
+    for name in ("OneConf 2026", "TwoConf 2026"):
+        entry: dict = _src_b_entry(name, (_FROZEN_TODAY + timedelta(days=30)).isoformat())
+        entry["cfpLink"] = None
+        entries.append(entry)
+    _patch_urlopen(monkeypatch, source_a=[], source_b=entries)
+
+    _, out, _ = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert _health(payload, "javaconferences.org")["status"] == "filtered"
+    assert _health(payload, "javaconferences.org")["records_filtered"] == 2
+    assert payload["feed_failure"] is False
+
+
+def test_undecodable_by_recursion_is_a_format_failure(check_cfps_fetch, monkeypatch, capsys):
+    """A decoder failure is a decoder failure whatever it raises: a document
+    nested past the interpreter's limit yields `malformed_feed`, not an
+    escaping traceback that leaves the caller no health record at all."""
+    module, _, _ = check_cfps_fetch
+    deeply_nested = "[" * 20000 + "]" * 20000
+    _patch_urlopen(monkeypatch, source_a=deeply_nested, source_b=[])
+
+    code, out, _ = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert code == 0
+    assert _health(payload, "developers.events")["status"] == "malformed_feed"
+    assert any("is not valid JSON" in w for w in payload["warnings"]), payload["warnings"]
+
+
 def test_every_source_failed_sets_feed_failure(check_cfps_fetch, monkeypatch, capsys):
     """Source A unreachable and Source B all-malformed → `feed_failure` true,
     the single branch point the scheduled technical-failure path reads."""

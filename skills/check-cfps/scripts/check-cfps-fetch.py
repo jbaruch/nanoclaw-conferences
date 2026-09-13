@@ -225,7 +225,10 @@ def fetch_developers_events(warnings: list) -> tuple[list, dict]:
     # contract distinguishes the two.
     try:
         data = json.loads(body)
-    except json.JSONDecodeError as e:
+    except (json.JSONDecodeError, RecursionError) as e:
+        # RecursionError too: an absurdly nested document is the decoder
+        # failing on input, and letting it escape would leave the caller a
+        # traceback instead of the health record the contract promises.
         warnings.append(f"Source A ({SOURCE_A_NAME}): response is not valid JSON: {e}")
         return [], _health("malformed_feed")
 
@@ -349,7 +352,10 @@ def fetch_javaconferences(warnings: list) -> tuple[list, dict]:
     # contract distinguishes the two.
     try:
         data = json.loads(body)
-    except json.JSONDecodeError as e:
+    except (json.JSONDecodeError, RecursionError) as e:
+        # RecursionError too: an absurdly nested document is the decoder
+        # failing on input, and letting it escape would leave the caller a
+        # traceback instead of the health record the contract promises.
         warnings.append(f"Source B ({SOURCE_B_NAME}): response is not valid JSON: {e}")
         return [], _health("malformed_feed")
 
@@ -364,8 +370,19 @@ def fetch_javaconferences(warnings: list) -> tuple[list, dict]:
     for entry in data:
         try:
             # The feed lists conferences whether or not a CFP is open, so a
-            # missing cfpLink is a normal drop, not a shape failure.
-            cfp_link = entry.get("cfpLink", "").strip()
+            # missing cfpLink is a normal drop, not a shape failure — and a
+            # JSON `null` means exactly the same thing. Stripping it blind
+            # would raise, count the record malformed, and let a healthy feed
+            # full of link-less conferences escalate all the way to
+            # `feed_failure`. A truthy non-string is still malformed.
+            cfp_link = entry.get("cfpLink") or ""
+            if not isinstance(cfp_link, str):
+                counts["malformed"] += 1
+                sys.stderr.write(
+                    f"check-cfps-fetch: source B entry has a non-string cfpLink ({cfp_link!r})\n"
+                )
+                continue
+            cfp_link = cfp_link.strip()
             if not cfp_link:
                 counts["filtered"] += 1
                 continue
