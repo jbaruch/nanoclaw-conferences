@@ -15,7 +15,7 @@ disk so a continuation re-reads the last artifact instead of rebuilding it.
 Artifacts live in a per-run directory (default
 `/workspace/group/state/cfp-run/`, override via `CFP_RUN_STATE_DIR`):
 
-  manifest.json   {"schema_version": 1, "run_date": "<YYYY-MM-DD UTC>",
+  manifest.json   {"schema_version": 2, "run_date": "<YYYY-MM-DD UTC>",
                    "completed": ["fetch", "candidates", ...]}
   <stage>.json    the JSON artifact saved for that stage
 
@@ -68,7 +68,7 @@ from pathlib import Path
 
 DEFAULT_RUN_DIR = Path("/workspace/group/state/cfp-run")
 MANIFEST_NAME = "manifest.json"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 STAGE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
 

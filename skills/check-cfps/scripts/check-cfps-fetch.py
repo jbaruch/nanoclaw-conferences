@@ -41,7 +41,8 @@ records_filtered}`. `records_filtered` counts entries the feed's own rules
 drop as a normal outcome (a closed CFP, a conference with no CFP link);
 `records_malformed` counts entries whose shape or types the parser could
 not use (missing name, absent or non-numeric deadline, unparseable date,
-non-string location, an entry that raised). Feed-level failures are
+non-string location, an entry that raised a record-shape error). Feed-level
+failures are
 separate: a body that will not decode as JSON and a non-list root are both
 `malformed_feed`, distinct from an `unreachable` transport error.
 `classify_source` maps those counts to `status` — see its docstring for the
@@ -137,6 +138,21 @@ def make_slug(name: str, conf_date: str = "", deadline: str = "") -> str:
 
 SOURCE_A_NAME = "developers.events"
 SOURCE_B_NAME = "javaconferences.org"
+
+# What a malformed upstream RECORD can realistically raise as it is read:
+# a wrong type where a str/dict/number belongs (AttributeError, TypeError),
+# an unparseable or out-of-range value (ValueError, OverflowError), a
+# platform epoch limit (OSError), an absent key on a dict-like (KeyError).
+# A programming defect raises outside this set and propagates, so a bug in
+# this script is never laundered into a "the feed drifted" count.
+RECORD_SHAPE_ERRORS = (
+    AttributeError,
+    TypeError,
+    ValueError,
+    KeyError,
+    OverflowError,
+    OSError,
+)
 
 # Statuses that mean "this source delivered nothing usable for a technical
 # reason". `empty` (nothing published) and `filtered` (everything dropped by
@@ -301,7 +317,7 @@ def fetch_developers_events(warnings: list) -> tuple[list, dict]:
                 }
             )
             counts["usable"] += 1
-        except Exception as exc:
+        except RECORD_SHAPE_ERRORS as exc:
             # Per-entry guard: swallowing one bad entry is right, but
             # count and log it so systematic upstream format changes
             # become visible instead of producing an empty output.
@@ -405,7 +421,7 @@ def fetch_javaconferences(warnings: list) -> tuple[list, dict]:
                 }
             )
             counts["usable"] += 1
-        except Exception as exc:
+        except RECORD_SHAPE_ERRORS as exc:
             # Per-entry guard — count and log the skip so feed-format
             # changes surface in the source's health instead of silently
             # thinning the list.

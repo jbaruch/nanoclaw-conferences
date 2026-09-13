@@ -24,11 +24,11 @@ cfp-run/
 
 `scripts/run-state.py load <stage>` only. No other skill or script reads these artifacts; they are scratch state for a single in-flight run, distinct from `cfp-state.json` (the durable, owned CFP data).
 
-## manifest.json shape (schema_version 1)
+## manifest.json shape (schema_version 2)
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "run_date": "2026-06-13",
   "completed": ["fetch", "candidates", "verify"]
 }
@@ -36,7 +36,7 @@ cfp-run/
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `schema_version` | integer | yes | Currently `1`. Bump on shape change. `begin` resumes only when this equals the supported version; a mismatch (future/partial shape) is treated as no usable prior run and resets. |
+| `schema_version` | integer | yes | Currently `2` — `1` predates the `fetch` artifact carrying `sources` and `feed_failure`. Bump on shape change. `begin` resumes only when this equals the supported version; a mismatch (future/partial shape) is treated as no usable prior run and resets. |
 | `run_date` | string | yes | UTC date (`YYYY-MM-DD`) the run began. `begin` resumes only when this equals today; otherwise it resets. |
 | `completed` | string[] | yes | Stage names saved so far, in completion order, deduped. |
 
@@ -88,5 +88,14 @@ python3 .../run-state.py invalidate verify working_set verify-evidence
 - **Success** — Step 8 finishes the state write and stampers, then calls `done` to remove the directory. The next run starts clean.
 - **Failure** — on a technical failure the agent stops without `done`; artifacts persist so a same-day retry resumes. A retry on a later UTC day resets to a fresh full run.
 - **Verification-gate failure** — when `stamp-last-checked.py` exits 3 (verification not evidenced), the agent keeps the store but runs `invalidate verify working_set verify-evidence` first (references/write-state.md item 12). Without this, a same-day retry would resume from the saved `verify`/`working_set` artifacts and repeat the heartbeat refusal without a new Sessionize call; with it, the retry reloads `fetch`/`candidates` and re-runs Step 5 live.
+
+## Migration policy
+
+Per `coding-policy: stateful-artifacts`, any shape change to a saved stage artifact bumps `SCHEMA_VERSION` in `scripts/run-state.py`. This store's owner migrates by **invalidation**, not by upgrading records: `begin` resumes only on an exact version match, so a manifest written by an older version is cleared and the run starts fresh.
+
+That is the whole migration path, and it is safe here because resume is an optimization — a fresh run recomputes every stage from scratch. There is no reader outside this skill, so no dual-accept window is needed.
+
+- `2` — the `fetch` artifact carries `sources` and `feed_failure` (jbaruch/nanoclaw-conferences#78). A `1` manifest may hold a `fetch` artifact without them, so it is invalidated rather than resumed.
+- `1` — initial shape.
 
 Resume is best-effort: a fresh full run is always safe (it does not depend on any saved artifact), so a missing or reset store only costs redone work, never correctness.

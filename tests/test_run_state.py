@@ -48,7 +48,7 @@ def test_begin_fresh_creates_manifest(run_state, capsys):
     assert out["resume"] is False
     assert out["completed"] == []
     manifest = _manifest(run_dir)
-    assert manifest["schema_version"] == 1
+    assert manifest["schema_version"] == module.SCHEMA_VERSION
     assert manifest["completed"] == []
     assert manifest["run_date"] == out["run_date"]
 
@@ -162,6 +162,40 @@ def test_begin_resets_on_unsupported_schema_version(run_state, monkeypatch, caps
     assert out["resume"] is False
     assert out["completed"] == []
     assert _manifest(run_dir)["schema_version"] == module.SCHEMA_VERSION
+
+
+def test_begin_does_not_resume_a_prior_schema_version(run_state, monkeypatch, capsys):
+    """An older manifest on TODAY's date is invalidated, not resumed: its
+    `fetch` artifact predates the `sources`/`feed_failure` fields the current
+    pipeline reads (jbaruch/nanoclaw-conferences#78). Invalidation is this
+    store's entire migration path — a fresh run recomputes every stage."""
+    module, run_dir = run_state
+    day = datetime(2026, 6, 15, 9, 0, 0, tzinfo=timezone.utc)
+    _freeze(module, monkeypatch, day)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": module.SCHEMA_VERSION - 1,
+                "run_date": "2026-06-15",
+                "completed": ["fetch"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (run_dir / "fetch.json").write_text(
+        json.dumps({"cfps": [], "warnings": [], "checked_at": "2026-06-15T09:00:00Z"}),
+        encoding="utf-8",
+    )
+
+    rc = module.main(["begin"])
+    out = _out(capsys)
+
+    assert rc == 0
+    assert out["resume"] is False
+    assert out["completed"] == []
+    assert _manifest(run_dir)["schema_version"] == module.SCHEMA_VERSION
+    assert not (run_dir / "fetch.json").exists()
 
 
 def test_load_absent_stage_exits_2(run_state, capsys):
