@@ -91,11 +91,11 @@ python3 .../run-state.py invalidate verify working_set verify-evidence
 
 ## Migration policy
 
-Per `coding-policy: stateful-artifacts`, any shape change to a saved stage artifact bumps `SCHEMA_VERSION` in `scripts/run-state.py`. This store's owner migrates by **invalidation**, not by upgrading records: `begin` resumes only on an exact version match, so a manifest written by an older version is cleared and the run starts fresh.
+Per `coding-policy: stateful-artifacts`, any shape change to a saved stage artifact bumps `SCHEMA_VERSION` in `scripts/run-state.py`. Only the owner migrates: `begin` detects an older `schema_version`, upgrades the record, and rewrites it. The run survives the upgrade — its `run_date` and every stage the shape change does not affect are kept, so a same-day continuation still resumes. A version this script does not recognize (a newer shape, a partial write) is not upgradeable and resets to a fresh run.
 
-That is the whole migration path, and it is safe here because resume is an optimization — a fresh run recomputes every stage from scratch. There is no reader outside this skill, so no dual-accept window is needed.
+Each step names the stages its change invalidates; invalidation truncates rather than filters, because resume means "start at the first stage NOT in `completed`" and a mid-list removal would let a stale downstream artifact read as current. The per-version steps are the script's contract (`_migrate_manifest` in `scripts/run-state.py`).
 
-- `2` — the `fetch` artifact carries `sources` and `feed_failure` (jbaruch/nanoclaw-conferences#78). A `1` manifest may hold a `fetch` artifact without them, so it is invalidated rather than resumed.
+- `2` — the `fetch` artifact carries `sources` and `feed_failure` (jbaruch/nanoclaw-conferences#78).
 - `1` — initial shape.
 
 Resume is best-effort: a fresh full run is always safe (it does not depend on any saved artifact), so a missing or reset store only costs redone work, never correctness.

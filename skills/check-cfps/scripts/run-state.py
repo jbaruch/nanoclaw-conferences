@@ -20,7 +20,9 @@ Artifacts live in a per-run directory (default
   <stage>.json    the JSON artifact saved for that stage
 
 Subcommands:
-  begin          Start (or resume) a run. If manifest.json exists with
+  begin          Start (or resume) a run. An older schema_version is
+                 upgraded in place by the owner (see _migrate_manifest).
+                 If manifest.json exists with
                  run_date == today (UTC), resume: emit
                  {"resume": true, "run_date", "completed": [...]}. Otherwise
                  (absent, stale date, or unreadable manifest) reset the dir
@@ -138,17 +140,83 @@ def _clear_dir(run_dir: Path) -> None:
             child.unlink()
 
 
+def _truncate_at_stage(manifest: dict, stage: str) -> list:
+    """Drop `stage` and every stage after it from `manifest["completed"]`,
+    returning the stage names whose artifacts the caller must unlink.
+
+    Truncation rather than filtering, for the reason `cmd_invalidate` gives:
+    resume means "start at the first stage NOT in completed", so removing a
+    stage from the middle would let a stale downstream artifact read as
+    current. Manifest content is data, not trusted input — non-string and
+    traversal-shaped entries are gated before they can reach an unlink."""
+    completed = manifest.get("completed")
+    if not isinstance(completed, list):
+        manifest["completed"] = []
+        return []
+    indexes = [i for i, s in enumerate(completed) if isinstance(s, str) and s == stage]
+    if not indexes:
+        return []
+    cut = min(indexes)
+    stale = [s for s in completed[cut:] if isinstance(s, str) and STAGE_RE.match(s)]
+    manifest["completed"] = completed[:cut]
+    return stale
+
+
+def _migrate_manifest(manifest: dict) -> tuple:
+    """Upgrade an older manifest to SCHEMA_VERSION.
+
+    Returns `(upgraded_manifest, stale_stages)`, or `(None, [])` when the
+    version cannot be upgraded — unrecognized, or newer than this script
+    understands. Per `coding-policy: stateful-artifacts`, only the owner
+    migrates: it detects the older `schema_version`, upgrades the record,
+    and the caller rewrites it. The run itself survives the upgrade — its
+    `run_date` and the stages unaffected by the shape change are kept, so a
+    same-day continuation resumes instead of recomputing everything.
+
+    Each step states which saved stages its shape change invalidates:
+
+    v1 -> v2: the `fetch` artifact gained `sources` and `feed_failure`
+    (jbaruch/nanoclaw-conferences#78), so a v1 `fetch.json` predates both
+    and cannot satisfy a reader that expects them."""
+    upgraded = dict(manifest)
+    stale: list = []
+    version = upgraded.get("schema_version")
+
+    if version == 1:
+        stale = _truncate_at_stage(upgraded, "fetch")
+        upgraded["schema_version"] = 2
+        version = 2
+
+    if version != SCHEMA_VERSION:
+        return None, []
+    return upgraded, stale
+
+
 def cmd_begin(run_dir: Path) -> int:
     today = _today()
     manifest = _read_manifest(run_dir)
     if (
         manifest is not None
-        and manifest.get("schema_version") == SCHEMA_VERSION
         and manifest.get("run_date") == today
         and isinstance(manifest.get("completed"), list)
     ):
-        print(json.dumps({"resume": True, "run_date": today, "completed": manifest["completed"]}))
-        return 0
+        upgraded, stale = _migrate_manifest(manifest)
+        if upgraded is not None:
+            if upgraded != manifest:
+                # Rewrite BEFORE any unlink, the ordering cmd_invalidate
+                # uses: a failed rewrite aborts with the artifacts intact,
+                # and a failed unlink afterwards leaves only an orphan file
+                # no longer listed in `completed`.
+                _atomic_write_json(run_dir / MANIFEST_NAME, upgraded)
+                for name in stale:
+                    try:
+                        (run_dir / f"{name}.json").unlink()
+                    except FileNotFoundError:
+                        pass
+            print(
+                json.dumps({"resume": True, "run_date": today, "completed": upgraded["completed"]})
+            )
+            return 0
 
     _clear_dir(run_dir)
     fresh = {"schema_version": SCHEMA_VERSION, "run_date": today, "completed": []}

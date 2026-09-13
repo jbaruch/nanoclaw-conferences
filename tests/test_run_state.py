@@ -164,11 +164,12 @@ def test_begin_resets_on_unsupported_schema_version(run_state, monkeypatch, caps
     assert _manifest(run_dir)["schema_version"] == module.SCHEMA_VERSION
 
 
-def test_begin_does_not_resume_a_prior_schema_version(run_state, monkeypatch, capsys):
-    """An older manifest on TODAY's date is invalidated, not resumed: its
-    `fetch` artifact predates the `sources`/`feed_failure` fields the current
-    pipeline reads (jbaruch/nanoclaw-conferences#78). Invalidation is this
-    store's entire migration path — a fresh run recomputes every stage."""
+def test_begin_upgrades_a_prior_schema_version_in_place(run_state, monkeypatch, capsys):
+    """The owner migrates: a v1 manifest on TODAY's date is detected,
+    upgraded, and rewritten — the run survives with its `run_date` intact.
+    The v1 `fetch` artifact predates `sources`/`feed_failure`
+    (jbaruch/nanoclaw-conferences#78), so that stage and everything after it
+    is dropped and its file removed."""
     module, run_dir = run_state
     day = datetime(2026, 6, 15, 9, 0, 0, tzinfo=timezone.utc)
     _freeze(module, monkeypatch, day)
@@ -176,26 +177,54 @@ def test_begin_does_not_resume_a_prior_schema_version(run_state, monkeypatch, ca
     (run_dir / "manifest.json").write_text(
         json.dumps(
             {
-                "schema_version": module.SCHEMA_VERSION - 1,
+                "schema_version": 1,
                 "run_date": "2026-06-15",
-                "completed": ["fetch"],
+                "completed": ["fetch", "candidates"],
             }
         ),
         encoding="utf-8",
     )
-    (run_dir / "fetch.json").write_text(
-        json.dumps({"cfps": [], "warnings": [], "checked_at": "2026-06-15T09:00:00Z"}),
-        encoding="utf-8",
-    )
+    for stage in ("fetch", "candidates"):
+        (run_dir / f"{stage}.json").write_text(json.dumps({"stage": stage}), encoding="utf-8")
 
     rc = module.main(["begin"])
     out = _out(capsys)
 
     assert rc == 0
-    assert out["resume"] is False
+    # Upgraded, not reset: the run continues under its own run_date.
+    assert out["resume"] is True
+    assert out["run_date"] == "2026-06-15"
     assert out["completed"] == []
-    assert _manifest(run_dir)["schema_version"] == module.SCHEMA_VERSION
+    manifest = _manifest(run_dir)
+    assert manifest["schema_version"] == module.SCHEMA_VERSION
+    assert manifest["run_date"] == "2026-06-15"
+    assert manifest["completed"] == []
+    # `candidates` derives from `fetch`, so the truncation cascades.
     assert not (run_dir / "fetch.json").exists()
+    assert not (run_dir / "candidates.json").exists()
+
+
+def test_begin_upgrade_keeps_stages_untouched_by_the_shape_change(run_state, monkeypatch, capsys):
+    """A v1 manifest that never saved `fetch` loses nothing: the upgrade
+    invalidates only what the shape change actually affects."""
+    module, run_dir = run_state
+    day = datetime(2026, 6, 15, 9, 0, 0, tzinfo=timezone.utc)
+    _freeze(module, monkeypatch, day)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "manifest.json").write_text(
+        json.dumps({"schema_version": 1, "run_date": "2026-06-15", "completed": ["candidates"]}),
+        encoding="utf-8",
+    )
+    (run_dir / "candidates.json").write_text(json.dumps({"pool": []}), encoding="utf-8")
+
+    rc = module.main(["begin"])
+    out = _out(capsys)
+
+    assert rc == 0
+    assert out["resume"] is True
+    assert out["completed"] == ["candidates"]
+    assert _manifest(run_dir)["schema_version"] == module.SCHEMA_VERSION
+    assert (run_dir / "candidates.json").exists()
 
 
 def test_load_absent_stage_exits_2(run_state, capsys):
