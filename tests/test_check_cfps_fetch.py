@@ -798,3 +798,66 @@ def test_non_list_roots_report_malformed_feed(check_cfps_fetch, monkeypatch, cap
     assert payload["feed_failure"] is True
     assert _health(payload, "developers.events")["status"] == "malformed_feed"
     assert _health(payload, "javaconferences.org")["status"] == "malformed_feed"
+
+
+def test_undecodable_body_is_a_format_failure_not_unreachable(
+    check_cfps_fetch, monkeypatch, capsys
+):
+    """A response that arrived but is not JSON is `malformed_feed`. Folding the
+    parse into the transport `except` labelled it `unreachable`, which is the
+    conflation the health contract exists to remove."""
+    module, _, _ = check_cfps_fetch
+    _patch_urlopen(monkeypatch, source_a="<html>502 Bad Gateway</html>", source_b="not json")
+
+    _, out, _ = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert _health(payload, "developers.events")["status"] == "malformed_feed"
+    assert _health(payload, "javaconferences.org")["status"] == "malformed_feed"
+    assert any("is not valid JSON" in w for w in payload["warnings"]), payload["warnings"]
+    assert payload["feed_failure"] is True
+
+
+def test_non_string_location_is_counted_not_fatal(check_cfps_fetch, monkeypatch, capsys):
+    """`location` is never strip()ed, so a non-string used to escape the
+    per-entry guard and abort the whole run inside is_virtual()'s .lower().
+    It is now a counted malformed record on both sources."""
+    module, _, _ = check_cfps_fetch
+    bad_a = _src_a_entry("NullLocA 2026", _FROZEN_TODAY + timedelta(days=20))
+    bad_a["conf"]["location"] = None
+    good_a = _src_a_entry("GoodA 2026", _FROZEN_TODAY + timedelta(days=25))
+    # Annotated loosely on purpose: the point of the fixture is a field whose
+    # type the feed got wrong.
+    bad_b: dict = _src_b_entry("NullLocB 2026", (_FROZEN_TODAY + timedelta(days=10)).isoformat())
+    bad_b["locationName"] = 42
+    _patch_urlopen(monkeypatch, source_a=[bad_a, good_a], source_b=[bad_b])
+
+    code, out, err = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert code == 0
+    assert [c["name"] for c in payload["cfps"]] == ["GoodA 2026"]
+    assert _health(payload, "developers.events")["status"] == "partial"
+    assert _health(payload, "developers.events")["records_malformed"] == 1
+    assert _health(payload, "javaconferences.org")["status"] == "all_malformed"
+    assert "non-string location" in err
+    assert "non-string locationName" in err
+
+
+def test_feed_failure_suppresses_the_web_fallback_warning(check_cfps_fetch, monkeypatch, capsys):
+    """Every feed failed technically → no "web search fallback needed": that
+    wording would make a format outage read as a normal empty result. The
+    per-source warnings still name what actually broke."""
+    module, _, _ = check_cfps_fetch
+    nameless = _src_a_entry("Placeholder 2026", _FROZEN_TODAY + timedelta(days=20))
+    nameless["conf"]["name"] = ""
+    _patch_urlopen(monkeypatch, source_a=[nameless], source_b=ConnectionError("boom"))
+
+    _, out, _ = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert payload["feed_failure"] is True
+    assert payload["cfps"] == []
+    assert not any("web search fallback needed" in w for w in payload["warnings"])
+    assert any("all 1 records unusable" in w for w in payload["warnings"]), payload["warnings"]
+    assert any("Source B (javaconferences.org) unreachable" in w for w in payload["warnings"])

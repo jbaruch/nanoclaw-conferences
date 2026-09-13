@@ -46,7 +46,7 @@ The check-cfps pipeline checkpoints these stages in order. Each is the JSON arti
 
 | Stage | Produced after | Artifact |
 |-------|----------------|----------|
-| `fetch` | Step 3 fetch script | `check-cfps-fetch.py` stdout (`{cfps, warnings, checked_at}`) |
+| `fetch` | Step 3 fetch script | `check-cfps-fetch.py` stdout (`{cfps, warnings, sources, feed_failure, checked_at}`) |
 | `candidates` | Steps 2–4 merge | the merged, slug-deduped candidate pool (Sessionize + fetch; interactive runs also include web-search results) |
 | `verify` | Step 5 driver | `verify-sessionize.py` stdout (`{prep, results, decisions, summary, non_sessionize, evidence}`) |
 | `working_set` | Steps 5–7 | the in-memory entry set (verified + relevance + travel applied) about to be written in Step 8 |

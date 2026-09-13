@@ -41,14 +41,19 @@ records_filtered}`. `records_filtered` counts entries the feed's own rules
 drop as a normal outcome (a closed CFP, a conference with no CFP link);
 `records_malformed` counts entries whose shape or types the parser could
 not use (missing name, absent or non-numeric deadline, unparseable date,
-an entry that raised). `classify_source` maps those counts to `status` —
-see its docstring for the predicate.
+non-string location, an entry that raised). Feed-level failures are
+separate: a body that will not decode as JSON and a non-list root are both
+`malformed_feed`, distinct from an `unreachable` transport error.
+`classify_source` maps those counts to `status` — see its docstring for the
+predicate.
 
 `feed_failure` is the single branch point for callers: true when EVERY
 source failed to deliver anything usable for a technical reason
-(unreachable, non-list root, or all-malformed records). A valid empty feed
-and a feed whose entries were all legitimately filtered are NOT failures,
-and neither is a partially usable feed.
+(unreachable, unparseable or non-list root, or all-malformed records). A
+valid empty feed and a feed whose entries were all legitimately filtered
+are NOT failures, and neither is a partially usable feed. The
+"web search fallback needed" warning is suppressed under `feed_failure`,
+so a format outage is never dressed up as a normal empty result.
 
 Exit code 0 on success. Exit code 1 when cfp-state.json exists but cannot be
 read or parsed — the state filter (sent/dismissed/remind/blocked) must not be
@@ -194,10 +199,19 @@ def fetch_developers_events(warnings: list) -> tuple[list, dict]:
     url = "https://developers.events/all-cfps.json"
     try:
         with urllib.request.urlopen(url, timeout=15) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+            body = resp.read().decode("utf-8", errors="replace")
     except Exception as e:
         warnings.append(f"Source A ({SOURCE_A_NAME}) unreachable: {e}")
         return [], _health("unreachable")
+
+    # Parsing is separate from fetching: a response that arrived but is not
+    # JSON is a format failure, not a transport outage, and the health
+    # contract distinguishes the two.
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError as e:
+        warnings.append(f"Source A ({SOURCE_A_NAME}): response is not valid JSON: {e}")
+        return [], _health("malformed_feed")
 
     if not isinstance(data, list):
         warnings.append("Source A: unexpected format (not a list)")
@@ -235,7 +249,17 @@ def fetch_developers_events(warnings: list) -> tuple[list, dict]:
                 continue
 
             cfp_url = entry.get("link", "") or conf.get("hyperlink", "")
+            # `location` is never .strip()ed here, so a non-string would sail
+            # past this guard and blow up in is_virtual()'s .lower() — outside
+            # any per-entry handler, taking the whole run with it.
             location = conf.get("location", "")
+            if not isinstance(location, str):
+                counts["malformed"] += 1
+                sys.stderr.write(
+                    f"check-cfps-fetch: source A entry {name!r} has a non-string "
+                    f"location ({location!r})\n"
+                )
+                continue
 
             # Conference date: first date in conf.date array (ms timestamps)
             conf_dates = conf.get("date", [])
@@ -299,10 +323,19 @@ def fetch_javaconferences(warnings: list) -> tuple[list, dict]:
     url = "https://javaconferences.org/conferences.json"
     try:
         with urllib.request.urlopen(url, timeout=15) as resp:
-            data = json.loads(resp.read().decode("utf-8", errors="replace"))
+            body = resp.read().decode("utf-8", errors="replace")
     except Exception as e:
         warnings.append(f"Source B ({SOURCE_B_NAME}) unreachable: {e}")
         return [], _health("unreachable")
+
+    # Parsing is separate from fetching: a response that arrived but is not
+    # JSON is a format failure, not a transport outage, and the health
+    # contract distinguishes the two.
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError as e:
+        warnings.append(f"Source B ({SOURCE_B_NAME}): response is not valid JSON: {e}")
+        return [], _health("malformed_feed")
 
     if not isinstance(data, list):
         warnings.append("Source B: unexpected format (not a list)")
@@ -350,6 +383,13 @@ def fetch_javaconferences(warnings: list) -> tuple[list, dict]:
                 continue
 
             location = entry.get("locationName", "")
+            if not isinstance(location, str):
+                counts["malformed"] += 1
+                sys.stderr.write(
+                    f"check-cfps-fetch: source B entry {name!r} has a non-string "
+                    f"locationName ({location!r})\n"
+                )
+                continue
             conf_date_str = entry.get("date", "")
             conf_date_parsed = parse_flexible_date(conf_date_str)
             conf_date = conf_date_parsed.isoformat() if conf_date_parsed else ""
@@ -555,7 +595,11 @@ def main():
     sources = {SOURCE_A_NAME: health_a, SOURCE_B_NAME: health_b}
     feed_failure = all(h["status"] in FAILED_STATUSES for h in sources.values())
 
-    if not all_cfps:
+    # Gate on `feed_failure`: suggesting a web fallback for a run where every
+    # feed failed technically would dress a format outage up as a normal empty
+    # result — the exact conflation the per-source health exists to end. The
+    # unreachable / all-malformed warnings already name what went wrong.
+    if not all_cfps and not feed_failure:
         warnings.append("Both primary sources returned empty — web search fallback needed")
 
     # Load supporting data
