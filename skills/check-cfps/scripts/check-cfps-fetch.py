@@ -26,8 +26,29 @@ Output JSON:
       ...
     ],
     "warnings": ["Source A unreachable", ...],
+    "sources": {"developers.events": {...}, "javaconferences.org": {...}},
+    "feed_failure": false,
     "checked_at": "2026-03-29T05:00:00Z"
   }
+
+Per-source health (`sources`) exists because a feed whose every record is
+malformed used to be indistinguishable from a valid empty feed: the
+per-record guards logged to stderr and the source returned `[]` with no
+warning, so systematic upstream format drift read as "no open CFPs"
+(jbaruch/nanoclaw-conferences#78). Each source reports
+`{status, records_received, records_usable, records_malformed,
+records_filtered}`. `records_filtered` counts entries the feed's own rules
+drop as a normal outcome (a closed CFP, a conference with no CFP link);
+`records_malformed` counts entries whose shape or types the parser could
+not use (missing name, absent or non-numeric deadline, unparseable date,
+an entry that raised). `classify_source` maps those counts to `status` —
+see its docstring for the predicate.
+
+`feed_failure` is the single branch point for callers: true when EVERY
+source failed to deliver anything usable for a technical reason
+(unreachable, non-list root, or all-malformed records). A valid empty feed
+and a feed whose entries were all legitimately filtered are NOT failures,
+and neither is a partially usable feed.
 
 Exit code 0 on success. Exit code 1 when cfp-state.json exists but cannot be
 read or parsed — the state filter (sent/dismissed/remind/blocked) must not be
@@ -106,30 +127,99 @@ def make_slug(name: str, conf_date: str = "", deadline: str = "") -> str:
 
 
 # ---------------------------------------------------------------------------
+# Per-source feed health
+# ---------------------------------------------------------------------------
+
+SOURCE_A_NAME = "developers.events"
+SOURCE_B_NAME = "javaconferences.org"
+
+# Statuses that mean "this source delivered nothing usable for a technical
+# reason". `empty` (nothing published) and `filtered` (everything dropped by
+# the feed's own normal rules) are valid outcomes and stay out of this set.
+FAILED_STATUSES = frozenset({"unreachable", "malformed_feed", "all_malformed"})
+
+
+def classify_source(received: int, usable: int, malformed: int) -> str:
+    """Map per-record counts to a source status.
+
+    `empty` — the feed carried no entries at all (valid).
+    `filtered` — entries arrived, none survived, and none were malformed:
+        every one was dropped by a normal rule (closed CFP, no CFP link).
+    `all_malformed` — entries arrived, none survived, at least one was
+        malformed: the failure mode that used to masquerade as an empty feed.
+    `partial` — at least one usable record alongside at least one malformed
+        one: usable output plus a format-drift signal.
+    `ok` — at least one usable record and nothing malformed."""
+    if received == 0:
+        return "empty"
+    if usable == 0:
+        return "all_malformed" if malformed else "filtered"
+    return "partial" if malformed else "ok"
+
+
+def _health(status: str, *, received=0, usable=0, malformed=0, filtered=0) -> dict:
+    return {
+        "status": status,
+        "records_received": received,
+        "records_usable": usable,
+        "records_malformed": malformed,
+        "records_filtered": filtered,
+    }
+
+
+def _finish_source(label: str, name: str, counts: dict, warnings: list) -> dict:
+    """Build the health record and append the source-level warning that the
+    all-malformed case needs — without it the caller sees only an empty list."""
+    status = classify_source(counts["received"], counts["usable"], counts["malformed"])
+    if status == "all_malformed":
+        warnings.append(
+            f"{label} ({name}): all {counts['received']} records unusable "
+            f"({counts['malformed']} malformed) — feed format likely changed"
+        )
+    return _health(
+        status,
+        received=counts["received"],
+        usable=counts["usable"],
+        malformed=counts["malformed"],
+        filtered=counts["filtered"],
+    )
+
+
+# ---------------------------------------------------------------------------
 # Source A: developers.events
 # ---------------------------------------------------------------------------
 
 
-def fetch_developers_events(warnings: list) -> list:
+def fetch_developers_events(warnings: list) -> tuple[list, dict]:
     url = "https://developers.events/all-cfps.json"
     try:
         with urllib.request.urlopen(url, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8", errors="replace"))
     except Exception as e:
-        warnings.append(f"Source A (developers.events) unreachable: {e}")
-        return []
+        warnings.append(f"Source A ({SOURCE_A_NAME}) unreachable: {e}")
+        return [], _health("unreachable")
 
     if not isinstance(data, list):
         warnings.append("Source A: unexpected format (not a list)")
-        return []
+        return [], _health("malformed_feed")
 
     now_ms = datetime.now(timezone.utc).timestamp() * 1000
     results = []
+    counts = {"received": len(data), "usable": 0, "malformed": 0, "filtered": 0}
 
     for entry in data:
         try:
             until_ms = entry.get("untilDate", 0)
-            if not until_ms or until_ms <= now_ms:
+            # A missing or non-numeric deadline is a shape failure; a real
+            # timestamp in the past is a closed CFP, which is a normal drop.
+            if not isinstance(until_ms, (int, float)) or isinstance(until_ms, bool) or not until_ms:
+                counts["malformed"] += 1
+                sys.stderr.write(
+                    f"check-cfps-fetch: source A entry has no usable untilDate ({until_ms!r})\n"
+                )
+                continue
+            if until_ms <= now_ms:
+                counts["filtered"] += 1
                 continue
 
             # Feed timestamps are UTC epoch ms; convert in UTC explicitly.
@@ -140,6 +230,8 @@ def fetch_developers_events(warnings: list) -> list:
             conf = entry.get("conf", {})
             name = conf.get("name", "").strip()
             if not name:
+                counts["malformed"] += 1
+                sys.stderr.write("check-cfps-fetch: source A entry has no conf.name\n")
                 continue
 
             cfp_url = entry.get("link", "") or conf.get("hyperlink", "")
@@ -181,19 +273,21 @@ def fetch_developers_events(warnings: list) -> list:
                     "conf_date": conf_date or "",
                     "cfp_url": cfp_url,
                     "deadline": deadline.isoformat(),
-                    "source": "developers.events",
+                    "source": SOURCE_A_NAME,
                 }
             )
+            counts["usable"] += 1
         except Exception as exc:
             # Per-entry guard: swallowing one bad entry is right, but
-            # log so systematic upstream format changes become visible
-            # instead of producing an empty output.
+            # count and log it so systematic upstream format changes
+            # become visible instead of producing an empty output.
+            counts["malformed"] += 1
             sys.stderr.write(
                 f"check-cfps-fetch: source A entry skipped ({type(exc).__name__}: {exc})\n"
             )
             continue
 
-    return results
+    return results, _finish_source("Source A", SOURCE_A_NAME, counts, warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -201,37 +295,58 @@ def fetch_developers_events(warnings: list) -> list:
 # ---------------------------------------------------------------------------
 
 
-def fetch_javaconferences(warnings: list) -> list:
+def fetch_javaconferences(warnings: list) -> tuple[list, dict]:
     url = "https://javaconferences.org/conferences.json"
     try:
         with urllib.request.urlopen(url, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8", errors="replace"))
     except Exception as e:
-        warnings.append(f"Source B (javaconferences.org) unreachable: {e}")
-        return []
+        warnings.append(f"Source B ({SOURCE_B_NAME}) unreachable: {e}")
+        return [], _health("unreachable")
 
     if not isinstance(data, list):
         warnings.append("Source B: unexpected format (not a list)")
-        return []
+        return [], _health("malformed_feed")
 
     today = date.today()
     results = []
+    counts = {"received": len(data), "usable": 0, "malformed": 0, "filtered": 0}
 
     for entry in data:
         try:
+            # The feed lists conferences whether or not a CFP is open, so a
+            # missing cfpLink is a normal drop, not a shape failure.
             cfp_link = entry.get("cfpLink", "").strip()
             if not cfp_link:
+                counts["filtered"] += 1
                 continue
 
+            # Past this point the entry claims an open CFP: an absent or
+            # unparseable end date is format drift, a past one is a closed CFP.
             cfp_end_str = entry.get("cfpEndDate", "")
             if not cfp_end_str:
+                counts["malformed"] += 1
+                sys.stderr.write(
+                    f"check-cfps-fetch: source B entry {cfp_link!r} has a cfpLink "
+                    f"but no cfpEndDate\n"
+                )
                 continue
             deadline = parse_flexible_date(cfp_end_str)
-            if not deadline or deadline < today:
+            if not deadline:
+                counts["malformed"] += 1
+                sys.stderr.write(
+                    f"check-cfps-fetch: source B entry {cfp_link!r} cfpEndDate "
+                    f"unparseable ({cfp_end_str!r})\n"
+                )
+                continue
+            if deadline < today:
+                counts["filtered"] += 1
                 continue
 
             name = entry.get("name", "").strip()
             if not name:
+                counts["malformed"] += 1
+                sys.stderr.write(f"check-cfps-fetch: source B entry {cfp_link!r} has no name\n")
                 continue
 
             location = entry.get("locationName", "")
@@ -246,17 +361,21 @@ def fetch_javaconferences(warnings: list) -> list:
                     "conf_date": conf_date,
                     "cfp_url": cfp_link,
                     "deadline": deadline.isoformat(),
-                    "source": "javaconferences.org",
+                    "source": SOURCE_B_NAME,
                 }
             )
+            counts["usable"] += 1
         except Exception as exc:
-            # Per-entry guard — log skip so feed-format changes surface.
+            # Per-entry guard — count and log the skip so feed-format
+            # changes surface in the source's health instead of silently
+            # thinning the list.
+            counts["malformed"] += 1
             sys.stderr.write(
                 f"check-cfps-fetch: source B entry skipped ({type(exc).__name__}: {exc})\n"
             )
             continue
 
-    return results
+    return results, _finish_source("Source B", SOURCE_B_NAME, counts, warnings)
 
 
 # ---------------------------------------------------------------------------
@@ -430,9 +549,11 @@ def main():
     today = date.today()
 
     # Fetch
-    source_a = fetch_developers_events(warnings)
-    source_b = fetch_javaconferences(warnings)
+    source_a, health_a = fetch_developers_events(warnings)
+    source_b, health_b = fetch_javaconferences(warnings)
     all_cfps = source_a + source_b
+    sources = {SOURCE_A_NAME: health_a, SOURCE_B_NAME: health_b}
+    feed_failure = all(h["status"] in FAILED_STATUSES for h in sources.values())
 
     if not all_cfps:
         warnings.append("Both primary sources returned empty — web search fallback needed")
@@ -476,6 +597,8 @@ def main():
     output = {
         "cfps": filtered,
         "warnings": warnings,
+        "sources": sources,
+        "feed_failure": feed_failure,
         "checked_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
     }
     print(json.dumps(output, ensure_ascii=False, indent=2))

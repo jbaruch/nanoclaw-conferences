@@ -2,6 +2,16 @@
 
 All notable changes to this plugin are documented here.
 
+## 0.1.47 — 2026-09-13
+
+### Fix — expose per-source malformed-record health (#78)
+
+`check-cfps-fetch.py` logged per-record shape and type failures to stderr and returned an empty list with no source-level warning, so a feed whose every record was malformed was indistinguishable from a valid empty feed: systematic upstream format drift read as "no open CFPs", and the scheduled technical-failure branch had only warning prose to reason from. Each source now reports `{status, records_received, records_usable, records_malformed, records_filtered}` under a top-level `sources` key. `classify_source` keeps five outcomes distinct — `empty` (nothing published), `filtered` (every entry dropped by a normal feed rule, such as a closed CFP or a conference with no CFP link), `all_malformed` (entries arrived, none survived, at least one was a shape failure), `partial` (usable records alongside drift), and `ok` — and the all-malformed case now appends a source-level warning naming the counts.
+
+Classification follows what the feed itself claims: a missing or non-numeric `untilDate`, an absent or unparseable `cfpEndDate` on an entry that carries a `cfpLink`, a nameless record, and an entry that raised are malformed; a past deadline and a conference with no CFP link are filtered. A new top-level `feed_failure` boolean is the single branch point for callers — true only when every source failed for a technical reason (unreachable, non-list root, all-malformed) — and `SKILL.md`'s scheduled Step 4 now branches on it instead of on warning text, so a valid empty feed and a partially usable feed both stay non-failures. Nine regression cases cover the predicate directly and each outcome end to end.
+
+The wrapper's failure lifecycle in `skills/nightly-cfp-sync/state-schema.md` now matches what `nightly-cfp-sync/SKILL.md` actually describes: format failures and a denied required tool, not just unreachable sources. The `Scheduled execution` bullets that combined applying the scheduled branches with completing the invocation, and interactive behavior with scheduled fallback precedence, are split one directive per bullet.
+
 ## 0.1.46 — 2026-09-13
 
 ### Fix — first-run empty commit leaves no state file (#79)

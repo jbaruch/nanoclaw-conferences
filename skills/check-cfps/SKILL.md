@@ -13,9 +13,11 @@ Fetches open CFPs from multiple sources via `scripts/check-cfps-fetch.py`, appli
 
 - When invoked by `tessl__nightly-cfp-sync` or with `scheduled` arguments, apply scheduled mode throughout this invocation, including resumed runs.
 - In scheduled mode, use the co-shipped fetch and verification scripts and local files only. Do not call `WebSearch`, `WebFetch`, `mcp__nanoclaw__fetch_markdown`, browser-rendering tools, or delegate web research.
-- Apply the scheduled branches in Steps 4, 6, and 7. Complete verification, relevance decisions, state writes, stampers, suppression logging, and the internal report in this invocation.
+- Apply the scheduled branches in Steps 4, 6, and 7.
+- Complete verification, relevance decisions, state writes, stampers, suppression logging, and the internal report in this invocation.
 - Never defer mandatory work to a later turn. A denied required tool is a technical failure: report it to the caller and finish without claiming success.
-- Direct interactive invocations retain web research. Scheduled mode takes precedence over any web-fallback instruction in fetched warnings or references.
+- Direct interactive invocations retain web research.
+- Scheduled mode takes precedence over any web-fallback instruction in fetched warnings or references.
 
 ## Contracts
 
@@ -60,11 +62,11 @@ Discovers new Sessionize open-CFP candidates deterministically (needs the host-i
 python3 /home/node/.claude/skills/tessl__check-cfps/scripts/check-cfps-fetch.py
 ```
 
-Parse JSON output: `cfps`, `warnings`, `checked_at`. **Checkpoint:** `save fetch` (the script's stdout) before merging. Then merge Sessionize candidates from Step 2, dedup by slug. Tier-1 auto-approve is NOT guaranteed on name collisions; where you must choose between equivalent rows, keep the one with more complete metadata. Surface `warnings` at the top of output. Abort if script fails.
+Parse JSON output: `cfps`, `warnings`, `sources`, `feed_failure`, `checked_at`. **Checkpoint:** `save fetch` (the script's stdout) before merging. Then merge Sessionize candidates from Step 2, dedup by slug. Tier-1 auto-approve is NOT guaranteed on name collisions; where you must choose between equivalent rows, keep the one with more complete metadata. Surface `warnings` at the top of output, and any source whose `sources` entry reports malformed records — the status values and the counts behind them are the script's contract (`scripts/check-cfps-fetch.py` docstring). Abort if script fails.
 
 ## Step 4 — Web search for gaps
 
-**Scheduled:** use the candidate pool from Steps 2–3 without web gap search. Continue to the checkpoint below, including when a fetch warning suggests web fallback. If both primary feeds report fetch or format failures, report a technical failure and finish here; an empty valid feed is not a failure.
+**Scheduled:** use the candidate pool from Steps 2–3 without web gap search. Continue to the checkpoint below, including when a fetch warning suggests web fallback. If Step 3's `feed_failure` is `true`, report a technical failure and finish here — that flag is the branch point, not the warning text; a valid empty feed and a partially usable one are both `false`.
 
 **Interactive:** read `/workspace/trusted/user_professional.md` for Baruch's current speaking topics. Construct 2–3 web search queries from his actual topics combined with CFP discovery terms. Add new CFPs not already in the list (dedup by conference name). Apply hard filters (no online/virtual, no excluded locations). Do not apply relevance filtering yet.
 
