@@ -13,13 +13,45 @@ cfp-state.json directly):
     is refused — all exit 1 with a diagnostic, state untouched.
   - Absent state file = first run; corrupt state = exit 1 diagnostic;
     contended lock honors the exit-1 contract.
+  - A first run whose working set is empty still materializes `{}` so
+    the Step 8 stampers that follow have a file to read
+    (jbaruch/nanoclaw-conferences#79); an existing file with nothing to
+    write stays byte-identical.
 """
 
 import io
 import json
+import subprocess
 import threading
+from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+CURSOR_SCRIPT = REPO_ROOT / "skills/nightly-cfp-sync/scripts/stamp-cursor.py"
+
+# Fixed instants for the first-run chain (coding-policy: testing-standards —
+# injected reference, never the wall clock). The wrapper run starts at
+# RUN_START; stamp-last-checked's frozen clock lands the heartbeat at
+# FROZEN_ISO, which is at/after RUN_START, so the cursor gate passes.
+RUN_START = "2026-05-02T06:30:00Z"
+FROZEN_NOW = datetime(2026, 5, 2, 6, 32, 0, tzinfo=timezone.utc)
+FROZEN_ISO = "2026-05-02T06:32:00Z"
+CURSOR_NOW = "2026-05-02T06:33:00Z"
+
+
+def _freeze(module, monkeypatch):
+    """Pin `module.datetime.now()` at FROZEN_NOW — the same frozen-subclass
+    idiom test_stamp_last_checked.py uses for the heartbeat stamp."""
+    real = module.datetime
+
+    class FrozenDateTime(real):
+        @classmethod
+        def now(cls, tz=None):
+            return FROZEN_NOW if tz is not None else FROZEN_NOW.replace(tzinfo=None)
+
+    monkeypatch.setattr(module, "datetime", FrozenDateTime)
 
 
 def _stdin(monkeypatch, payload):
@@ -186,6 +218,101 @@ def test_concurrent_writer_update_survives_commit(commit_state, state_lock, tmp_
     final = _read(state_path)
     assert final["mine-2026"] == {"status": "sent"}
     assert final["theirs-2026"] == {"status": "open"}
+
+
+def test_first_run_empty_commit_materializes_empty_state(
+    commit_state, tmp_path, monkeypatch, capsys
+):
+    """Absent state file + empty working set: the file is created holding an
+    empty object. Discovery finding nothing on a fresh install must not leave
+    the stampers a missing file (jbaruch/nanoclaw-conferences#79)."""
+    state_path = tmp_path / "cfp-state.json"
+    _stdin(monkeypatch, {})
+
+    rc = commit_state.main(["--state", str(state_path)])
+
+    assert rc == 0
+    assert _out(capsys) == {"written": 0, "skipped_user_actioned": 0, "total_records": 0}
+    assert state_path.exists()
+    assert _read(state_path) == {}
+
+
+def test_existing_state_untouched_by_empty_commit(commit_state, tmp_path, monkeypatch, capsys):
+    """The first-run materialization is scoped to an absent file: an existing
+    state with nothing to write is left byte-identical."""
+    state_path = tmp_path / "cfp-state.json"
+    original = json.dumps({"a-2026": {"status": "open"}}, indent=4)
+    state_path.write_text(original, encoding="utf-8")
+    _stdin(monkeypatch, {})
+
+    rc = commit_state.main(["--state", str(state_path)])
+
+    assert rc == 0
+    assert _out(capsys) == {"written": 0, "skipped_user_actioned": 0, "total_records": 1}
+    assert state_path.read_text(encoding="utf-8") == original
+
+
+def test_first_run_empty_commit_feeds_stampers_and_cursor(
+    commit_state, stamp_schema_version, stamp_last_checked, tmp_path, monkeypatch, capsys
+):
+    """The whole first-run-with-no-candidates path: empty commit, then the
+    schema stamper, the none-required heartbeat, and the wrapper cursor all
+    succeed on the materialized state instead of exiting 1 on a missing file."""
+    state_path = tmp_path / "cfp-state.json"
+    _stdin(monkeypatch, {})
+    assert commit_state.main(["--state", str(state_path)]) == 0
+    capsys.readouterr()
+
+    assert stamp_schema_version.main(["--state", str(state_path)]) == 0
+    assert json.loads(capsys.readouterr().out.strip()) == {"total": 0, "stamped": 0}
+
+    # Nothing was discovered, so there is no Sessionize cohort to verify:
+    # sessionize_total == 0 is the heartbeat's "none-required" branch.
+    evidence = tmp_path / "verify-evidence.json"
+    evidence.write_text(
+        json.dumps(
+            {
+                "run_date": FROZEN_NOW.date().isoformat(),
+                "slugs_expected": 0,
+                "sessionize_total": 0,
+                "live_call": False,
+                "verified": 0,
+                "dismissed": 0,
+                "dropped": 0,
+                "verify_failed": 0,
+            }
+        ),
+        encoding="utf-8",
+    )
+    _freeze(stamp_last_checked, monkeypatch)
+    rc = stamp_last_checked.main(["--state", str(state_path), "--evidence", str(evidence)])
+    assert rc == 0
+    assert json.loads(capsys.readouterr().out.strip()) == {
+        "_last_checked": FROZEN_ISO,
+        "verification": "none-required",
+    }
+
+    cursor_path = tmp_path / "nightly-cfp-sync-cursor.json"
+    proc = subprocess.run(
+        [
+            "python3",
+            str(CURSOR_SCRIPT),
+            "--cursor",
+            str(cursor_path),
+            "--state",
+            str(state_path),
+            "--since",
+            RUN_START,
+            "--now",
+            CURSOR_NOW,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert json.loads(proc.stdout.strip())["status"] == "stamped"
+    assert _read(cursor_path)["last_run"] == CURSOR_NOW
 
 
 if __name__ == "__main__":

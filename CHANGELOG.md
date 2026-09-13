@@ -2,6 +2,12 @@
 
 All notable changes to this plugin are documented here.
 
+## 0.1.46 — 2026-09-13
+
+### Fix — first-run empty commit leaves no state file (#79)
+
+`commit-state.py` accepted an empty working set but wrote `cfp-state.json` only when at least one record was committed. On a fresh install whose discovery produced no candidates, the file therefore stayed absent and the Step 8 stampers that run next — `stamp-schema-version.py` and `stamp-last-checked.py` — both exit 1 on a missing state file, so the run failed after a legitimately empty pass. The committer now materializes an empty state object under the same advisory lock when the file is absent; an existing file with nothing to write is still left untouched, so idempotency for every other run is unchanged. A regression test drives the whole first-run path: empty commit, schema stamp, the `none-required` heartbeat, and the wrapper cursor, on a fixed clock.
+
 ## 0.1.45 — 2026-09-11
 
 ### Fix — complete scheduled CFP sync without web-tool taint (#73)

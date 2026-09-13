@@ -20,7 +20,12 @@ OTHER slugs always survive. One invariant is re-checked at commit time
 against the fresh read: a record that is `user_actioned: true` ON DISK is
 never overwritten (the agent's copy may predate the user's action) —
 those slugs are skipped and counted. Absent state file = first run =
-empty state.
+empty state, and that empty state is materialized on disk under the same
+lock even when the working set writes no record: the Step 8 stampers
+that run next (stamp-schema-version.py, stamp-last-checked.py) exit 1 on
+a missing file, so a first run whose discovery found nothing has to leave
+a readable `{}` behind. An already-present state file with nothing to
+write is left untouched.
 
 Output (stdout, JSON): {"written": N, "skipped_user_actioned": M,
 "total_records": T} — T is the record count in the file after commit.
@@ -133,10 +138,12 @@ def main(argv=None) -> int:
 
     try:
         with state_lock.locked(args.state):
+            state_absent = False
             try:
                 state = json.loads(args.state.read_text(encoding="utf-8"))
             except FileNotFoundError:
                 state = {}
+                state_absent = True
             except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
                 sys.stderr.write(
                     f"commit-state: cannot read {args.state}: "
@@ -163,7 +170,11 @@ def main(argv=None) -> int:
                 state[slug] = record
                 written += 1
 
-            if written:
+            # `state_absent` carries the first-run case through an empty
+            # working set: the file has to exist for the stampers that
+            # follow, so materialize `{}` rather than skipping the write.
+            # An existing file with nothing written stays untouched.
+            if written or state_absent:
                 try:
                     _atomic_write_json(args.state, state)
                 except OSError as exc:
