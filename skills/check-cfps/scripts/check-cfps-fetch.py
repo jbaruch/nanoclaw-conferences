@@ -225,10 +225,14 @@ def fetch_developers_events(warnings: list) -> tuple[list, dict]:
     # contract distinguishes the two.
     try:
         data = json.loads(body)
-    except (json.JSONDecodeError, RecursionError) as e:
-        # RecursionError too: an absurdly nested document is the decoder
-        # failing on input, and letting it escape would leave the caller a
-        # traceback instead of the health record the contract promises.
+    except (ValueError, RecursionError) as e:
+        # Every way the decoder can fail on input maps to the same outcome,
+        # because letting one escape leaves the caller a traceback instead of
+        # the health record the contract promises — and takes the other
+        # source's results with it. `ValueError` is the family: it covers
+        # `JSONDecodeError` (its subclass) and the digit-limit error a
+        # 5,000-digit integer literal raises. `RecursionError` is not a
+        # `ValueError`, so an absurdly nested document needs naming too.
         warnings.append(f"Source A ({SOURCE_A_NAME}): response is not valid JSON: {e}")
         return [], _health("malformed_feed")
 
@@ -352,10 +356,14 @@ def fetch_javaconferences(warnings: list) -> tuple[list, dict]:
     # contract distinguishes the two.
     try:
         data = json.loads(body)
-    except (json.JSONDecodeError, RecursionError) as e:
-        # RecursionError too: an absurdly nested document is the decoder
-        # failing on input, and letting it escape would leave the caller a
-        # traceback instead of the health record the contract promises.
+    except (ValueError, RecursionError) as e:
+        # Every way the decoder can fail on input maps to the same outcome,
+        # because letting one escape leaves the caller a traceback instead of
+        # the health record the contract promises — and takes the other
+        # source's results with it. `ValueError` is the family: it covers
+        # `JSONDecodeError` (its subclass) and the digit-limit error a
+        # 5,000-digit integer literal raises. `RecursionError` is not a
+        # `ValueError`, so an absurdly nested document needs naming too.
         warnings.append(f"Source B ({SOURCE_B_NAME}): response is not valid JSON: {e}")
         return [], _health("malformed_feed")
 

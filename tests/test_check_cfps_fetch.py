@@ -820,6 +820,26 @@ def test_undecodable_by_recursion_is_a_format_failure(check_cfps_fetch, monkeypa
     assert any("is not valid JSON" in w for w in payload["warnings"]), payload["warnings"]
 
 
+def test_oversized_integer_literal_is_a_format_failure(check_cfps_fetch, monkeypatch, capsys):
+    """An integer literal past the interpreter's digit limit raises a bare
+    ValueError, not a JSONDecodeError. Naming only the subclass let it escape
+    and abort the run — taking the healthy source's results with it."""
+    module, _, _ = check_cfps_fetch
+    huge_int_body = "[" + "9" * 5000 + "]"
+    src_b = [_src_b_entry("BravoConf 2026", (_FROZEN_TODAY + timedelta(days=10)).isoformat())]
+    _patch_urlopen(monkeypatch, source_a=huge_int_body, source_b=src_b)
+
+    code, out, _ = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert code == 0
+    assert _health(payload, "developers.events")["status"] == "malformed_feed"
+    assert any("is not valid JSON" in w for w in payload["warnings"]), payload["warnings"]
+    # Graceful fallback: the other source's results survive.
+    assert [c["name"] for c in payload["cfps"]] == ["BravoConf 2026"]
+    assert payload["feed_failure"] is False
+
+
 def test_every_source_failed_sets_feed_failure(check_cfps_fetch, monkeypatch, capsys):
     """Source A unreachable and Source B all-malformed → `feed_failure` true,
     the single branch point the scheduled technical-failure path reads."""
