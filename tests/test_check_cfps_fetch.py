@@ -619,3 +619,368 @@ def test_source_a_epoch_conversion_is_utc(check_cfps_fetch, monkeypatch, capsys)
         else:
             os.environ["TZ"] = old_tz
         time.tzset()
+
+
+# ---------------------------------------------------------------------------
+# Per-source feed health (jbaruch/nanoclaw-conferences#78)
+# ---------------------------------------------------------------------------
+
+
+def _health(payload, source):
+    return payload["sources"][source]
+
+
+def test_classify_source_predicate(check_cfps_fetch):
+    """The status predicate itself: emptiness, all-filtered, all-malformed,
+    partial, and clean are five distinct outcomes."""
+    module, _, _ = check_cfps_fetch
+    assert module.classify_source(0, 0, 0) == "empty"
+    assert module.classify_source(5, 0, 0) == "filtered"
+    assert module.classify_source(5, 0, 5) == "all_malformed"
+    assert module.classify_source(5, 0, 2) == "all_malformed"
+    assert module.classify_source(5, 3, 2) == "partial"
+    assert module.classify_source(5, 5, 0) == "ok"
+
+
+def test_clean_feeds_report_ok_and_no_failure(check_cfps_fetch, monkeypatch, capsys):
+    """Both feeds deliver usable records → per-source `ok`, honest counts,
+    and `feed_failure` false."""
+    module, _, travel_path = check_cfps_fetch
+    travel_path.write_text("[]")
+    src_a = [_src_a_entry("AlphaConf 2026", _FROZEN_TODAY + timedelta(days=20))]
+    src_b = [_src_b_entry("BravoConf 2026", (_FROZEN_TODAY + timedelta(days=10)).isoformat())]
+    _patch_urlopen(monkeypatch, source_a=src_a, source_b=src_b)
+
+    _, out, _ = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert payload["feed_failure"] is False
+    assert _health(payload, "developers.events") == {
+        "status": "ok",
+        "records_received": 1,
+        "records_usable": 1,
+        "records_malformed": 0,
+        "records_filtered": 0,
+    }
+    assert _health(payload, "javaconferences.org")["status"] == "ok"
+
+
+def test_all_malformed_source_is_distinguished_from_empty(check_cfps_fetch, monkeypatch, capsys):
+    """The regression: every Source A record malformed used to look exactly
+    like a valid empty feed — empty `cfps`, no warning. It now reports
+    `all_malformed` with a source-level warning."""
+    module, _, travel_path = check_cfps_fetch
+    travel_path.write_text("[]")
+    nameless = _src_a_entry("Placeholder 2026", _FROZEN_TODAY + timedelta(days=20))
+    nameless["conf"]["name"] = ""
+    no_deadline = _src_a_entry("Other 2026", _FROZEN_TODAY + timedelta(days=20))
+    no_deadline["untilDate"] = None
+    src_b = [_src_b_entry("BravoConf 2026", (_FROZEN_TODAY + timedelta(days=10)).isoformat())]
+    _patch_urlopen(monkeypatch, source_a=[nameless, no_deadline], source_b=src_b)
+
+    _, out, err = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert _health(payload, "developers.events") == {
+        "status": "all_malformed",
+        "records_received": 2,
+        "records_usable": 0,
+        "records_malformed": 2,
+        "records_filtered": 0,
+    }
+    assert any("all 2 records unusable (2 malformed)" in w for w in payload["warnings"]), payload[
+        "warnings"
+    ]
+    assert "no conf.name" in err
+    # Source B still delivered, so this is not a whole-run failure.
+    assert payload["feed_failure"] is False
+    assert [c["name"] for c in payload["cfps"]] == ["BravoConf 2026"]
+
+
+def test_valid_empty_feeds_are_not_a_failure(check_cfps_fetch, monkeypatch, capsys):
+    """Both feeds reachable and genuinely empty → `empty` status on each and
+    `feed_failure` false: nothing published is not a technical failure."""
+    module, _, _ = check_cfps_fetch
+    _patch_urlopen(monkeypatch, source_a=[], source_b=[])
+
+    _, out, _ = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert payload["feed_failure"] is False
+    assert _health(payload, "developers.events")["status"] == "empty"
+    assert _health(payload, "javaconferences.org")["status"] == "empty"
+    assert _health(payload, "javaconferences.org")["records_malformed"] == 0
+
+
+def test_fully_filtered_feed_is_not_malformed(check_cfps_fetch, monkeypatch, capsys):
+    """Source B entries dropped by the feed's own normal rules — a closed CFP
+    and a conference with no CFP link — count as filtered, not malformed."""
+    module, _, _ = check_cfps_fetch
+    closed = _src_b_entry("ClosedConf 2026", (_FROZEN_TODAY - timedelta(days=1)).isoformat())
+    no_cfp = _src_b_entry("NoCfpConf 2026", (_FROZEN_TODAY + timedelta(days=30)).isoformat())
+    no_cfp["cfpLink"] = ""
+    _patch_urlopen(monkeypatch, source_a=[], source_b=[closed, no_cfp])
+
+    _, out, _ = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert _health(payload, "javaconferences.org") == {
+        "status": "filtered",
+        "records_received": 2,
+        "records_usable": 0,
+        "records_malformed": 0,
+        "records_filtered": 2,
+    }
+    assert payload["feed_failure"] is False
+
+
+def test_partially_usable_feed_keeps_its_usable_records(check_cfps_fetch, monkeypatch, capsys):
+    """One good record plus one whose date the parser cannot read → `partial`:
+    the usable record ships and the drift is still counted."""
+    module, _, _ = check_cfps_fetch
+    good = _src_b_entry("GoodConf 2026", (_FROZEN_TODAY + timedelta(days=12)).isoformat())
+    broken = _src_b_entry("BrokenConf 2026", "next tuesday-ish")
+    _patch_urlopen(monkeypatch, source_a=[], source_b=[good, broken])
+
+    _, out, err = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert _health(payload, "javaconferences.org") == {
+        "status": "partial",
+        "records_received": 2,
+        "records_usable": 1,
+        "records_malformed": 1,
+        "records_filtered": 0,
+    }
+    assert [c["name"] for c in payload["cfps"]] == ["GoodConf 2026"]
+    assert "cfpEndDate unparseable" in err
+    assert payload["feed_failure"] is False
+
+
+def test_null_cfp_link_is_filtered_not_malformed(check_cfps_fetch, monkeypatch, capsys):
+    """A JSON `null` cfpLink is the same "no CFP open" case as a missing one.
+    Stripping it blind would count the record malformed and let a healthy feed
+    of link-less conferences escalate to `feed_failure`."""
+    module, _, _ = check_cfps_fetch
+    null_link: dict = _src_b_entry(
+        "NoLinkConf 2026", (_FROZEN_TODAY + timedelta(days=30)).isoformat()
+    )
+    null_link["cfpLink"] = None
+    bad_link: dict = _src_b_entry(
+        "BadLinkConf 2026", (_FROZEN_TODAY + timedelta(days=30)).isoformat()
+    )
+    bad_link["cfpLink"] = 7
+    _patch_urlopen(monkeypatch, source_a=[], source_b=[null_link, bad_link])
+
+    _, out, err = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert _health(payload, "javaconferences.org") == {
+        "status": "all_malformed",
+        "records_received": 2,
+        "records_usable": 0,
+        "records_malformed": 1,
+        "records_filtered": 1,
+    }
+    assert "non-string cfpLink" in err
+
+
+def test_all_null_cfp_links_stay_a_filtered_feed(check_cfps_fetch, monkeypatch, capsys):
+    """The escalation the previous test guards against, end to end: every
+    entry link-less via `null` is a `filtered` feed, never `feed_failure`."""
+    module, _, _ = check_cfps_fetch
+    entries = []
+    for name in ("OneConf 2026", "TwoConf 2026"):
+        entry: dict = _src_b_entry(name, (_FROZEN_TODAY + timedelta(days=30)).isoformat())
+        entry["cfpLink"] = None
+        entries.append(entry)
+    _patch_urlopen(monkeypatch, source_a=[], source_b=entries)
+
+    _, out, _ = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert _health(payload, "javaconferences.org")["status"] == "filtered"
+    assert _health(payload, "javaconferences.org")["records_filtered"] == 2
+    assert payload["feed_failure"] is False
+
+
+def test_undecodable_by_recursion_is_a_format_failure(check_cfps_fetch, monkeypatch, capsys):
+    """A decoder failure is a decoder failure whatever it raises: a document
+    nested past the interpreter's limit yields `malformed_feed`, not an
+    escaping traceback that leaves the caller no health record at all."""
+    module, _, _ = check_cfps_fetch
+    deeply_nested = "[" * 20000 + "]" * 20000
+    _patch_urlopen(monkeypatch, source_a=deeply_nested, source_b=[])
+
+    code, out, _ = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert code == 0
+    assert _health(payload, "developers.events")["status"] == "malformed_feed"
+    assert any("is not valid JSON" in w for w in payload["warnings"]), payload["warnings"]
+
+
+def test_oversized_integer_literal_is_a_format_failure(check_cfps_fetch, monkeypatch, capsys):
+    """An integer literal past the interpreter's digit limit raises a bare
+    ValueError, not a JSONDecodeError. Naming only the subclass let it escape
+    and abort the run — taking the healthy source's results with it."""
+    module, _, _ = check_cfps_fetch
+    huge_int_body = "[" + "9" * 5000 + "]"
+    src_b = [_src_b_entry("BravoConf 2026", (_FROZEN_TODAY + timedelta(days=10)).isoformat())]
+    _patch_urlopen(monkeypatch, source_a=huge_int_body, source_b=src_b)
+
+    code, out, _ = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert code == 0
+    assert _health(payload, "developers.events")["status"] == "malformed_feed"
+    assert any("is not valid JSON" in w for w in payload["warnings"]), payload["warnings"]
+    # Graceful fallback: the other source's results survive.
+    assert [c["name"] for c in payload["cfps"]] == ["BravoConf 2026"]
+    assert payload["feed_failure"] is False
+
+
+def test_zero_epoch_deadline_is_filtered_not_malformed(check_cfps_fetch, monkeypatch, capsys):
+    """`untilDate: 0` is a numeric timestamp (1970) and so a closed CFP.
+    Testing truthiness instead of presence counted it malformed, which could
+    push an otherwise filtered source to `all_malformed` and `feed_failure`."""
+    module, _, _ = check_cfps_fetch
+    zero: dict = _src_a_entry("EpochConf 2026", _FROZEN_TODAY + timedelta(days=20))
+    zero["untilDate"] = 0
+    missing: dict = _src_a_entry("NoDeadlineConf 2026", _FROZEN_TODAY + timedelta(days=20))
+    del missing["untilDate"]
+    _patch_urlopen(monkeypatch, source_a=[zero, missing], source_b=[])
+
+    _, out, _ = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert _health(payload, "developers.events") == {
+        "status": "all_malformed",
+        "records_received": 2,
+        "records_usable": 0,
+        "records_malformed": 1,
+        "records_filtered": 1,
+    }
+
+
+def test_every_source_failed_sets_feed_failure(check_cfps_fetch, monkeypatch, capsys):
+    """Source A unreachable and Source B all-malformed → `feed_failure` true,
+    the single branch point the scheduled technical-failure path reads."""
+    module, _, _ = check_cfps_fetch
+    broken = _src_b_entry("BrokenConf 2026", "")
+    _patch_urlopen(monkeypatch, source_a=ConnectionError("boom"), source_b=[broken])
+
+    _, out, _ = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert payload["feed_failure"] is True
+    assert _health(payload, "developers.events")["status"] == "unreachable"
+    assert _health(payload, "javaconferences.org")["status"] == "all_malformed"
+
+
+def test_unreachable_plus_valid_empty_is_not_feed_failure(check_cfps_fetch, monkeypatch, capsys):
+    """One source down, the other validly empty: not every source failed for a
+    technical reason, so the run is not a technical failure."""
+    module, _, _ = check_cfps_fetch
+    _patch_urlopen(monkeypatch, source_a=ConnectionError("boom"), source_b=[])
+
+    _, out, _ = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert payload["feed_failure"] is False
+    assert _health(payload, "developers.events")["status"] == "unreachable"
+    assert _health(payload, "javaconferences.org")["status"] == "empty"
+
+
+def test_non_list_roots_report_malformed_feed(check_cfps_fetch, monkeypatch, capsys):
+    """A JSON object where a list belongs is a feed-level format failure on
+    both sources, and every source failing sets `feed_failure`."""
+    module, _, _ = check_cfps_fetch
+    _patch_urlopen(monkeypatch, source_a='{"cfps": []}', source_b='{"conferences": []}')
+
+    _, out, _ = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert payload["feed_failure"] is True
+    assert _health(payload, "developers.events")["status"] == "malformed_feed"
+    assert _health(payload, "javaconferences.org")["status"] == "malformed_feed"
+
+
+def test_undecodable_body_is_a_format_failure_not_unreachable(
+    check_cfps_fetch, monkeypatch, capsys
+):
+    """A response that arrived but is not JSON is `malformed_feed`. Folding the
+    parse into the transport `except` labelled it `unreachable`, which is the
+    conflation the health contract exists to remove."""
+    module, _, _ = check_cfps_fetch
+    _patch_urlopen(monkeypatch, source_a="<html>502 Bad Gateway</html>", source_b="not json")
+
+    _, out, _ = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert _health(payload, "developers.events")["status"] == "malformed_feed"
+    assert _health(payload, "javaconferences.org")["status"] == "malformed_feed"
+    assert any("is not valid JSON" in w for w in payload["warnings"]), payload["warnings"]
+    assert payload["feed_failure"] is True
+
+
+def test_non_string_location_is_counted_not_fatal(check_cfps_fetch, monkeypatch, capsys):
+    """`location` is never strip()ed, so a non-string used to escape the
+    per-entry guard and abort the whole run inside is_virtual()'s .lower().
+    It is now a counted malformed record on both sources."""
+    module, _, _ = check_cfps_fetch
+    bad_a = _src_a_entry("NullLocA 2026", _FROZEN_TODAY + timedelta(days=20))
+    bad_a["conf"]["location"] = None
+    good_a = _src_a_entry("GoodA 2026", _FROZEN_TODAY + timedelta(days=25))
+    # Annotated loosely on purpose: the point of the fixture is a field whose
+    # type the feed got wrong.
+    bad_b: dict = _src_b_entry("NullLocB 2026", (_FROZEN_TODAY + timedelta(days=10)).isoformat())
+    bad_b["locationName"] = 42
+    _patch_urlopen(monkeypatch, source_a=[bad_a, good_a], source_b=[bad_b])
+
+    code, out, err = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert code == 0
+    assert [c["name"] for c in payload["cfps"]] == ["GoodA 2026"]
+    assert _health(payload, "developers.events")["status"] == "partial"
+    assert _health(payload, "developers.events")["records_malformed"] == 1
+    assert _health(payload, "javaconferences.org")["status"] == "all_malformed"
+    assert "non-string location" in err
+    assert "non-string locationName" in err
+
+
+def test_one_source_down_one_validly_empty_does_not_claim_emptiness(
+    check_cfps_fetch, monkeypatch, capsys
+):
+    """The mixed case: a source that never answered is not a source that
+    returned empty. The fallback warning still fires (no usable CFPs, and this
+    is not a technical failure) but does not claim both feeds were empty."""
+    module, _, _ = check_cfps_fetch
+    _patch_urlopen(monkeypatch, source_a=ConnectionError("boom"), source_b=[])
+
+    _, out, _ = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert payload["feed_failure"] is False
+    assert any("No usable CFPs from the primary sources" in w for w in payload["warnings"])
+    assert not any("Both primary sources returned empty" in w for w in payload["warnings"])
+
+
+def test_feed_failure_suppresses_the_web_fallback_warning(check_cfps_fetch, monkeypatch, capsys):
+    """Every feed failed technically → no "web search fallback needed": that
+    wording would make a format outage read as a normal empty result. The
+    per-source warnings still name what actually broke."""
+    module, _, _ = check_cfps_fetch
+    nameless = _src_a_entry("Placeholder 2026", _FROZEN_TODAY + timedelta(days=20))
+    nameless["conf"]["name"] = ""
+    _patch_urlopen(monkeypatch, source_a=[nameless], source_b=ConnectionError("boom"))
+
+    _, out, _ = _run(module, monkeypatch, capsys)
+    payload = json.loads(out)
+
+    assert payload["feed_failure"] is True
+    assert payload["cfps"] == []
+    assert not any("web search fallback needed" in w for w in payload["warnings"])
+    assert any("all 1 records unusable" in w for w in payload["warnings"]), payload["warnings"]
+    assert any("Source B (javaconferences.org) unreachable" in w for w in payload["warnings"])

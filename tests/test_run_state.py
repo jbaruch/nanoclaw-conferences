@@ -48,7 +48,7 @@ def test_begin_fresh_creates_manifest(run_state, capsys):
     assert out["resume"] is False
     assert out["completed"] == []
     manifest = _manifest(run_dir)
-    assert manifest["schema_version"] == 1
+    assert manifest["schema_version"] == module.SCHEMA_VERSION
     assert manifest["completed"] == []
     assert manifest["run_date"] == out["run_date"]
 
@@ -162,6 +162,97 @@ def test_begin_resets_on_unsupported_schema_version(run_state, monkeypatch, caps
     assert out["resume"] is False
     assert out["completed"] == []
     assert _manifest(run_dir)["schema_version"] == module.SCHEMA_VERSION
+
+
+def test_begin_upgrades_a_prior_schema_version_in_place(run_state, monkeypatch, capsys):
+    """The owner migrates: a v1 manifest on TODAY's date is detected,
+    upgraded, and rewritten — the run survives with its `run_date` intact.
+    The v1 `fetch` artifact predates `sources`/`feed_failure`
+    (jbaruch/nanoclaw-conferences#78), so that stage and everything after it
+    is dropped and its file removed."""
+    module, run_dir = run_state
+    day = datetime(2026, 6, 15, 9, 0, 0, tzinfo=timezone.utc)
+    _freeze(module, monkeypatch, day)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "run_date": "2026-06-15",
+                "completed": ["fetch", "candidates"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    for stage in ("fetch", "candidates"):
+        (run_dir / f"{stage}.json").write_text(json.dumps({"stage": stage}), encoding="utf-8")
+
+    rc = module.main(["begin"])
+    out = _out(capsys)
+
+    assert rc == 0
+    # Upgraded, not reset: the run continues under its own run_date.
+    assert out["resume"] is True
+    assert out["run_date"] == "2026-06-15"
+    assert out["completed"] == []
+    manifest = _manifest(run_dir)
+    assert manifest["schema_version"] == module.SCHEMA_VERSION
+    assert manifest["run_date"] == "2026-06-15"
+    assert manifest["completed"] == []
+    # `candidates` derives from `fetch`, so the truncation cascades.
+    assert not (run_dir / "fetch.json").exists()
+    assert not (run_dir / "candidates.json").exists()
+
+
+def test_begin_upgrade_keeps_stages_untouched_by_the_shape_change(run_state, monkeypatch, capsys):
+    """A v1 manifest that never saved `fetch` loses nothing: the upgrade
+    invalidates only what the shape change actually affects."""
+    module, run_dir = run_state
+    day = datetime(2026, 6, 15, 9, 0, 0, tzinfo=timezone.utc)
+    _freeze(module, monkeypatch, day)
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "manifest.json").write_text(
+        json.dumps({"schema_version": 1, "run_date": "2026-06-15", "completed": ["candidates"]}),
+        encoding="utf-8",
+    )
+    (run_dir / "candidates.json").write_text(json.dumps({"pool": []}), encoding="utf-8")
+
+    rc = module.main(["begin"])
+    out = _out(capsys)
+
+    assert rc == 0
+    assert out["resume"] is True
+    assert out["completed"] == ["candidates"]
+    assert _manifest(run_dir)["schema_version"] == module.SCHEMA_VERSION
+    assert (run_dir / "candidates.json").exists()
+
+
+def test_begin_rejects_a_non_integer_schema_version(run_state, monkeypatch, capsys):
+    """`True == 1` and `2.0 == 2` in Python, so a bare equality test would let
+    `true` enter the v1 upgrade path (preserving completed stages) and `2.0`
+    pass as current. Both are malformed manifests and must reset."""
+    module, run_dir = run_state
+    day = datetime(2026, 6, 15, 9, 0, 0, tzinfo=timezone.utc)
+    _freeze(module, monkeypatch, day)
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    for bogus in (True, float(module.SCHEMA_VERSION), "2"):
+        (run_dir / "manifest.json").write_text(
+            json.dumps(
+                {"schema_version": bogus, "run_date": "2026-06-15", "completed": ["candidates"]}
+            ),
+            encoding="utf-8",
+        )
+        (run_dir / "candidates.json").write_text(json.dumps({"pool": []}), encoding="utf-8")
+
+        rc = module.main(["begin"])
+        out = _out(capsys)
+
+        assert rc == 0, bogus
+        assert out["resume"] is False, bogus
+        assert out["completed"] == [], bogus
+        assert _manifest(run_dir)["schema_version"] == module.SCHEMA_VERSION, bogus
+        assert not (run_dir / "candidates.json").exists(), bogus
 
 
 def test_load_absent_stage_exits_2(run_state, capsys):
