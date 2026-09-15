@@ -309,6 +309,74 @@ def test_invalid_stage_name_exits_1(run_state, monkeypatch, capsys):
     assert "invalid stage name" in captured.err
 
 
+@pytest.mark.parametrize("command", ["save", "load", "invalidate"])
+@pytest.mark.parametrize("stage", ["manifest", "manifest\n"])
+def test_reserved_stage_keeps_store_unchanged(run_state, monkeypatch, capsys, command, stage):
+    module, run_dir = run_state
+    module.main(["begin"])
+    _stdin(monkeypatch, {"a": 1})
+    module.main(["save", "fetch"])
+    capsys.readouterr()
+    before = {path.name: path.read_bytes() for path in run_dir.iterdir()}
+
+    _stdin(monkeypatch, {"replacement": True})
+    assert module.main([command, stage]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "invalid stage name" in captured.err
+    assert {path.name: path.read_bytes() for path in run_dir.iterdir()} == before
+
+
+def test_upgrade_reserved_stage_preserves_manifest(run_state, monkeypatch, capsys):
+    module, run_dir = run_state
+    _freeze(module, monkeypatch, datetime(2026, 6, 15, 9, tzinfo=timezone.utc))
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "run_date": "2026-06-15",
+                "completed": ["fetch", "manifest", "candidates"],
+            }
+        ),
+        encoding="utf-8",
+    )
+    for stage in ("fetch", "candidates"):
+        (run_dir / f"{stage}.json").write_text("{}", encoding="utf-8")
+
+    assert module.main(["begin"]) == 0
+    assert _out(capsys)["resume"] is True
+    assert _manifest(run_dir) == {
+        "schema_version": 2,
+        "run_date": "2026-06-15",
+        "completed": [],
+    }
+    assert {path.name for path in run_dir.iterdir()} == {"manifest.json"}
+    assert module.main(["begin"]) == 0
+    assert _out(capsys)["resume"] is True
+
+
+def test_current_manifest_repairs_reserved_checkpoint(run_state, monkeypatch, capsys):
+    module, run_dir = run_state
+    _freeze(module, monkeypatch, datetime(2026, 6, 15, 9, tzinfo=timezone.utc))
+    module.main(["begin"])
+    for stage in ("fetch", "candidates"):
+        _stdin(monkeypatch, {"stage": stage})
+        module.main(["save", stage])
+    manifest = _manifest(run_dir)
+    manifest["completed"] = ["fetch", "manifest", "candidates"]
+    (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    capsys.readouterr()
+
+    assert module.main(["begin"]) == 0
+    assert _out(capsys)["completed"] == ["fetch"]
+    assert _manifest(run_dir)["completed"] == ["fetch"]
+    assert (run_dir / "fetch.json").exists()
+    assert not (run_dir / "candidates.json").exists()
+    assert module.main(["load", "fetch"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"stage": "fetch"}
+
+
 def test_save_non_json_exits_1(run_state, monkeypatch, capsys):
     module, _ = run_state
     module.main(["begin"])
@@ -406,7 +474,7 @@ def test_invalidate_skips_invalid_cascaded_manifest_entries(run_state, monkeypat
     # Unhashable garbage BEFORE the target exercises the membership gate
     # (a raw `s in set(...)` would TypeError); "../escape" after it
     # exercises the traversal gate on cascaded names.
-    manifest["completed"] = [["bad"], "verify", "../escape"]
+    manifest["completed"] = [["bad"], "verify", "../escape", "manifest"]
     (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
 
     rc = module.main(["invalidate", "verify"])
