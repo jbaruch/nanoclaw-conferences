@@ -204,6 +204,9 @@ def _migrate_manifest(manifest: dict) -> tuple:
 
     if version != SCHEMA_VERSION:
         return None, []
+    # Older writers allowed the bookkeeping stem as a stage. Drop that
+    # checkpoint and its descendants before a resume tries to load it.
+    stale.extend(_truncate_at_stage(upgraded, "manifest"))
     return upgraded, stale
 
 

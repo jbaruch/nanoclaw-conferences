@@ -2,11 +2,11 @@
 
 All notable changes to this plugin are documented here.
 
-## Unreleased
+## 0.1.48 — 2026-09-15
 
 ### Fixed
 
-- Reserve `manifest` in run-state stage validation so save, load, invalidation, and schema migration cannot treat the checkpoint manifest as a stage artifact (#82).
+- Reserve `manifest` in run-state stage validation so save, load, invalidation, and schema migration cannot treat the checkpoint manifest as a stage artifact (#82). Repair existing reserved-name checkpoints before resuming.
 
 ## 0.1.47 — 2026-09-13
 

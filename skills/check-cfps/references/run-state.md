@@ -51,7 +51,7 @@ The check-cfps pipeline checkpoints these stages in order. Each is the JSON arti
 | `verify` | Step 5 driver | `verify-sessionize.py` stdout (`{prep, results, decisions, summary, non_sessionize, evidence}`) |
 | `working_set` | Steps 5–7 | the in-memory entry set (verified + relevance + travel applied) about to be written in Step 8 |
 
-Stage names are free-form lowercase identifiers (`[a-z0-9][a-z0-9_-]*`); the table above is the check-cfps contract, not a hard-coded enum in the script.
+Stage-name validation is defined by `STAGE_RE` in `skills/check-cfps/scripts/run-state.py`. The table above names the pipeline's checkpoints. `begin` repairs legacy reserved-name checkpoints before returning a resumable prefix.
 
 ## Commands
 

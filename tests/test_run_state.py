@@ -356,6 +356,27 @@ def test_upgrade_reserved_stage_preserves_manifest(run_state, monkeypatch, capsy
     assert _out(capsys)["resume"] is True
 
 
+def test_current_manifest_repairs_reserved_checkpoint(run_state, monkeypatch, capsys):
+    module, run_dir = run_state
+    _freeze(module, monkeypatch, datetime(2026, 6, 15, 9, tzinfo=timezone.utc))
+    module.main(["begin"])
+    for stage in ("fetch", "candidates"):
+        _stdin(monkeypatch, {"stage": stage})
+        module.main(["save", stage])
+    manifest = _manifest(run_dir)
+    manifest["completed"] = ["fetch", "manifest", "candidates"]
+    (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
+    capsys.readouterr()
+
+    assert module.main(["begin"]) == 0
+    assert _out(capsys)["completed"] == ["fetch"]
+    assert _manifest(run_dir)["completed"] == ["fetch"]
+    assert (run_dir / "fetch.json").exists()
+    assert not (run_dir / "candidates.json").exists()
+    assert module.main(["load", "fetch"]) == 0
+    assert json.loads(capsys.readouterr().out) == {"stage": "fetch"}
+
+
 def test_save_non_json_exits_1(run_state, monkeypatch, capsys):
     module, _ = run_state
     module.main(["begin"])
