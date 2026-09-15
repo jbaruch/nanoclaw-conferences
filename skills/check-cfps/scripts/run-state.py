@@ -50,7 +50,8 @@ idempotent and Step 5 re-verifies the full cohort, so a fresh full run is
 always safe. `begin` resets across UTC-day boundaries precisely so a
 days-later continuation starts clean rather than resuming a stale run.
 
-Stage names are free-form lowercase identifiers (`[a-z0-9][a-z0-9_-]*`);
+Stage names are free-form lowercase identifiers (`[a-z0-9][a-z0-9_-]*`),
+excluding the reserved bookkeeping stem `manifest`;
 check-cfps uses fetch, candidates, verify, working_set. Schema doc:
 `references/run-state.md`.
 
@@ -71,7 +72,7 @@ from pathlib import Path
 DEFAULT_RUN_DIR = Path("/workspace/group/state/cfp-run")
 MANIFEST_NAME = "manifest.json"
 SCHEMA_VERSION = 2
-STAGE_RE = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+STAGE_RE = re.compile(r"^(?!manifest\Z)[a-z0-9][a-z0-9_-]*\Z")
 
 
 def _run_dir() -> Path:

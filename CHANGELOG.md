@@ -2,6 +2,12 @@
 
 All notable changes to this plugin are documented here.
 
+## Unreleased
+
+### Fixed
+
+- Reserve `manifest` in run-state stage validation so save, load, invalidation, and schema migration cannot treat the checkpoint manifest as a stage artifact (#82).
+
 ## 0.1.47 — 2026-09-13
 
 ### Fix — expose per-source malformed-record health (#78)
