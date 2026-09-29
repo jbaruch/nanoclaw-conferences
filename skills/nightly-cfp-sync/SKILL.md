@@ -5,7 +5,7 @@ cadence: "30 6 * * * (TZ=local)"
 # agentModel pin renewal (no scanner tracks model pins): revisit when a newer
 # Sonnet tier ships (e.g. Sonnet 5); before bumping, revalidate with a one-shot
 # check-cfps run and confirm verify-sessionize.py fires end-to-end (see #50).
-agentModel: "claude-sonnet-4-6"
+agentModel: "claude-sonnet-5-5"
 script: "scripts/precheck-nightly-cfp-sync.py"
 evidence: "cfp-state.json#_last_checked"
 ---

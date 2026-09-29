@@ -2,6 +2,12 @@
 
 All notable changes to this plugin are documented here.
 
+## 0.1.53 — 2026-09-28
+
+### Changed
+
+- Run `nightly-cfp-sync` on `claude-sonnet-5-5` (was `claude-sonnet-4-6`), which is cheaper per token. Needs the agent image on claude-agent-sdk 0.3 (nanoclaw#974); the 0.2 CLI rejects the 5.5 models.
+
 ## 0.1.48 — 2026-09-15
 
 ### Fixed
