@@ -666,6 +666,13 @@ def mail_bytes(value):
         raise SourceError("mail_encoding; retain the unsupported provider evidence") from error
 
 
+def mail_header(value):
+    """Admin sanitization retains its fixed marker after a cut header."""
+    result = bounded(value, 306)
+    require(len(result) <= 300 or len(result) == 306 and result.endswith(" [...]"), "mail_header")
+    return result
+
+
 def mail_search(search):
     """Validate the published search1 envelope, including nested metadata.
 
@@ -710,6 +717,9 @@ def mail_search(search):
     errors = list_value(search["errors"], "mail_search_errors")
     failed_stubs: dict[str, set[str]] = {}
     invalid_stubs = 0
+    page_limits = 0
+    terminal_page = False
+    stubs_started = False
     for error in errors:
         require(isinstance(error, dict) and isinstance(error.get("kind"), str), "mail_search_error")
         kind = error["kind"]
@@ -722,6 +732,19 @@ def mail_search(search):
             and MAIL_ID.fullmatch(error["thread_id"]),
             "mail_search_error",
         )
+        if kind in {"page_limit_exceeded", "page_token_too_large", "repeated_page_token"}:
+            require(not stubs_started and not terminal_page, "mail_search_error")
+            if kind == "page_limit_exceeded":
+                page_limits += 1
+                require(page_limits <= 3, "mail_search_error")
+            else:
+                terminal_page = True
+                require(
+                    (search["next_page_token"] is None) == (kind == "page_token_too_large"),
+                    "mail_search_error",
+                )
+        else:
+            stubs_started = True
         if kind == "invalid_thread_id":
             invalid_stubs += 1
         elif kind in thread_errors:
@@ -795,7 +818,7 @@ def mail_search(search):
             mid = bounded(message["messageId"], 128)
             require(MAIL_ID.fullmatch(mid) and mid not in originals, "mail_message_identity")
             for key in ("from", "to", "subject"):
-                bounded(message[key], 300)
+                mail_header(message[key])
             labels = list_value(message["labelIds"], "mail_message_labels")
             require(
                 all(isinstance(label, str) and 0 < len(label) <= 200 for label in labels),
@@ -952,8 +975,9 @@ def mail_handoff(wrapper):
             and type(full["body_complete"]) is bool,
             "mail_body_evidence",
         )
-        bounded(full["subject"], 300)
-        bounded(full["from"], 300)
+        mail_header(full["subject"])
+        mail_header(full["from"])
+        require(full["subject"] == original["subject"], "mail_body_binding")
         body = bounded(full["body"], MAX_BODY)
         require(len(body.encode()) <= MAX_BODY, "mail_body_bounds")
         reads[mid] = full
@@ -1061,7 +1085,9 @@ def mail(request):
                     full = body_reads[identifier]
                     raw_body, body_complete = full["body"], full["body_complete"]
                 fingerprint = sha([subject, source_at, raw_body, body_complete])
-                fields = mail_fields(family, subject, mail_text(raw_body))
+                fields = (
+                    {} if len(subject) > 300 else mail_fields(family, subject, mail_text(raw_body))
+                )
                 if not fields:
                     gaps.append("source template unsupported; no status inferred")
                 gaps.append("proposal identity unverified; explicit owner/native binding required")

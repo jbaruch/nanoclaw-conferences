@@ -1538,3 +1538,80 @@ def test_equal_instant_sightings_use_a_deterministic_literal_tie_break(modules, 
     assert observations[0]["fact"]["observed_at"] == max(
         capture["observed_at"], other["observed_at"]
     )
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize(
+    "kinds,token",
+    [
+        (["page_limit_exceeded"] * 4, None),
+        (["page_token_too_large"] * 2, None),
+        (["repeated_page_token"] * 2, "cursor"),
+        (["page_token_too_large", "repeated_page_token"], "cursor"),
+        (["page_token_too_large"], "cursor"),
+        (["repeated_page_token"], None),
+        (["repeated_page_token", "page_limit_exceeded"], "cursor"),
+        (["invalid_thread_id", "page_limit_exceeded"], None),
+    ],
+)
+def test_search_refuses_impossible_page_error_relationships(modules, source_version, kinds, token):
+    source, _ = modules
+    packet = failed_stub_packet(source_version, 1, 0, [{"kind": kind} for kind in kinds])
+    evidence = packet["collections"][0]["evidence"]
+    search = evidence["search"] if source_version == 2 else evidence
+    search["next_page_token"] = token
+    with pytest.raises(source.SourceError, match="mail_search_error"):
+        source.prepare(packet)
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize(
+    "kinds,token",
+    [
+        (["page_limit_exceeded"] * 3, None),
+        (["page_limit_exceeded"] * 3, "cursor"),
+        (["page_limit_exceeded"] * 3 + ["page_token_too_large"], None),
+        (["page_limit_exceeded"] * 3 + ["repeated_page_token"], "cursor"),
+    ],
+)
+def test_native_terminal_page_errors_remain_supported(modules, source_version, kinds, token):
+    source, _ = modules
+    packet = failed_stub_packet(source_version, 1, 0, [{"kind": kind} for kind in kinds])
+    evidence = packet["collections"][0]["evidence"]
+    search = evidence["search"] if source_version == 2 else evidence
+    search["next_page_token"] = token
+    observations, scopes = source.prepare(packet)
+    assert len(observations) == 1 and not scopes[0]["complete"]
+
+
+@pytest.mark.parametrize("partial", [False, True])
+def test_hydrated_subject_mismatch_cannot_combine_observations_or_commit(
+    modules, tmp_path, partial
+):
+    source, owner = modules
+    packet = hydrated_mail(partial=partial)
+    packet["collections"][0]["evidence"]["body_reads"][0]["evidence"]["subject"] = "Unrelated mail"
+    path = tmp_path / "ledger"
+    with pytest.raises(source.SourceError, match="mail_body_binding"):
+        observations, scopes = source.prepare(packet)
+        owner.record_many(path, observations, scopes)
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize("field", ["subject", "from", "to"])
+def test_native_sanitized_header_truncation_shape_is_supported(modules, source_version, field):
+    source, _ = modules
+    packet = hydrated_mail()
+    wrapper = packet["collections"][0]["evidence"]
+    message = wrapper["search"]["threads"][0]["messages"][0]
+    message[field] = "X" * 300 + " [...]"
+    if field != "to":
+        wrapper["body_reads"][0]["evidence"][field] = message[field]
+    if source_version == 1:
+        packet["schema_version"] = 1
+        packet["collections"][0]["evidence"] = wrapper["search"]
+    observations, scopes = source.prepare(packet)
+    assert len(observations) == 1 and not scopes[0]["complete"]
+    if field == "subject":
+        assert observations[0]["fact"]["status"] is None
