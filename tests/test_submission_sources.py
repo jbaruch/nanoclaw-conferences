@@ -1615,3 +1615,23 @@ def test_native_sanitized_header_truncation_shape_is_supported(modules, source_v
     assert len(observations) == 1 and not scopes[0]["complete"]
     if field == "subject":
         assert observations[0]["fact"]["status"] is None
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize("interleaved", [False, True])
+@pytest.mark.parametrize("other", ["invalid_thread_id", "thread_unavailable"])
+def test_native_two_stage_failure_pair_is_consecutive(modules, source_version, interleaved, other):
+    source, _ = modules
+    payload = {"kind": "malformed_payload", "thread_id": "fff1"}
+    parser = {"kind": "malformed_thread", "thread_id": "fff1"}
+    between = {"kind": other}
+    if other == "thread_unavailable":
+        between["thread_id"] = "fff2"
+    errors = [payload, between, parser] if interleaved else [payload, parser, between]
+    packet = failed_stub_packet(source_version, 1, 0, errors)
+    if interleaved:
+        with pytest.raises(source.SourceError, match="mail_search_error"):
+            source.prepare(packet)
+    else:
+        observations, scopes = source.prepare(packet)
+        assert len(observations) == 1 and not scopes[0]["complete"]

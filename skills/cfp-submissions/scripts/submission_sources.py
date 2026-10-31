@@ -720,7 +720,7 @@ def mail_search(search):
     page_limits = 0
     terminal_page = False
     stubs_started = False
-    for error in errors:
+    for index, error in enumerate(errors):
         require(isinstance(error, dict) and isinstance(error.get("kind"), str), "mail_search_error")
         kind = error["kind"]
         require(
@@ -752,7 +752,11 @@ def mail_search(search):
             # The producer may record malformed payload before parsing that
             # same stub also fails. Other failure paths stop at their stage.
             require(
-                not stages or stages == {"malformed_payload"} and kind == "malformed_thread",
+                not stages
+                or stages == {"malformed_payload"}
+                and kind == "malformed_thread"
+                and errors[index - 1]
+                == {"kind": "malformed_payload", "thread_id": error["thread_id"]},
                 "mail_search_error",
             )
             stages.add(kind)
