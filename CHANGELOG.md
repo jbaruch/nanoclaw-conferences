@@ -2,6 +2,10 @@
 
 All notable changes to this plugin are documented here.
 
+### Declare Host authoring authority (part of #101)
+
+Add the normal floating `jbaruch/nanoclaw-host` authoring dependency so isolated source review can resolve the published Host contracts. This metadata prerequisite adds no collector, runtime behavior or capture permission.
+
 ## 0.1.62 — 2026-10-26
 
 ### Conference follow-up intake and private hold protocol (#93)
