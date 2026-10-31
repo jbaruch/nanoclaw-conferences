@@ -15,6 +15,8 @@ Per-chat overlay tile. Install via NanoClaw's `containerConfig.additionalTiles` 
 5. **Travel-conflict detection** — cross-checks CFP conference dates against the trip schedule and flags overlaps
 6. **Priority-interest tagging** — deterministic prefilter plus AI arbitration against an owner-defined priority list
 
+The format-independent submissions ledger records evidenced per-event/talk facts, retains unknown coverage and answers inclusive date-overlap queries. Bounded Sessionize rendered-node and maintained Gmail adapters retain actual source identities, unknown formats and incomplete coverage; no exhaustive collection or native acceptance is claimed.
+
 ## Installation
 
 ```
@@ -48,6 +50,7 @@ The skill reads and writes files under the shared `/workspace/group/` mount:
 
 | File | Access | Owner |
 |------|--------|-------|
+| `cfp-submissions.json` | read+write | cfp-submissions (new schema1; private evidence, unknown coverage retained) |
 | `cfp-state.json` | read+write | this plugin (schema-versioned, owner-migrated) |
 | `cfp-suppressed-today.json` | write | this plugin |
 | `cfp-priorities.json` | read | owner-managed |
@@ -70,6 +73,7 @@ Reads of admin-owned files resolve because admin co-loads with this overlay in t
 | Skill | Description |
 |-------|-------------|
 | [conference-followups](skills/conference-followups/SKILL.md) | Ground free-text/voice-transcript contacts, resolve addresses, humanize drafts and present host-held Send/Cancel/Edit cards. Requires the published host consumer and dedicated gateway identity; no live acceptance or account access is implied. |
+| [cfp-submissions](skills/cfp-submissions/SKILL.md) | Record normalized/manual submission evidence, bind explicit owner identities, query date overlap and reconcile exact existing CFPs through their guarded owner. Includes observed Sessionize/mail structural adapters; unknown identities/templates remain unresolved. |
 | [check-cfps](skills/check-cfps/SKILL.md) | Finds open CFPs relevant to the user across Java/AI/developer conferences and maintains persistent CFP state (sent/dismissed/remind) in `cfp-state.json`. Use when the user asks about upcoming conferences, call for papers, speaking opportunities, CFP deadlines, or where to submit a talk proposal. |
 | [nightly-cfp-sync](skills/nightly-cfp-sync/SKILL.md) | Cadence wrapper (cron `30 6`, precheck-gated by a filesystem cadence cursor) that runs `check-cfps` on a schedule, consumes the CFP list internally, and surfaces verification failures or missing-topic-evidence notices. Emits the observable-silence cursor marker the silent-success watchdog reads. |
 

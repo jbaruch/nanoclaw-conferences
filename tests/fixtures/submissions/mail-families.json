@@ -1,0 +1,462 @@
+{
+  "schema_version": 1,
+  "source": "mail",
+  "collections": [
+    {
+      "family": "sessionize-submission",
+      "scope": "bounded synthetic structural replay; not a live collection",
+      "observed_at": "2020-12-01T00:00:00Z",
+      "evidence": {
+        "schema_version": 1,
+        "threads": [],
+        "next_page_token": null,
+        "threads_omitted": 0,
+        "complete": true,
+        "errors": []
+      }
+    },
+    {
+      "family": "sessionize-sessions",
+      "scope": "bounded synthetic structural replay; not a live collection",
+      "observed_at": "2020-12-01T00:00:00Z",
+      "evidence": {
+        "schema_version": 1,
+        "threads": [
+          {
+            "thread_id": "example-thread-0",
+            "source_trust": "untrusted",
+            "messages": [
+              {
+                "messageId": "example-message-1",
+                "from": "Example Source <source@example.invalid>",
+                "to": "owner@example.invalid",
+                "subject": "Your sessions at Example Event 2020",
+                "internalDate": "2020-11-01T00:00:00Z",
+                "labelIds": [
+                  "IMPORTANT",
+                  "CATEGORY_UPDATES"
+                ],
+                "body": "Dear Example! We're sorry, but the following sessions have not been accepted for Example Event 2020: - Example Talk One- Example Talk Two Thanks, Example Event 2020 Tip: OMITTED",
+                "body_complete": true
+              }
+            ],
+            "message_count": 1,
+            "complete": true,
+            "thread_latest_message_from": "them",
+            "messages_omitted": 0
+          },
+          {
+            "thread_id": "example-thread-1",
+            "source_trust": "untrusted",
+            "messages": [
+              {
+                "messageId": "example-message-2",
+                "from": "Example Source <source@example.invalid>",
+                "to": "owner@example.invalid",
+                "subject": "Your sessions at Example Event 2020",
+                "internalDate": "2020-11-01T00:00:00Z",
+                "labelIds": [
+                  "IMPORTANT",
+                  "CATEGORY_UPDATES"
+                ],
+                "body": "Dear Example! We're sorry, but the following sessions have not been accepted for Example Event 2020: - Example Talk One- Example Talk Two Thanks, Example Event 2020 Tip: OMITTED",
+                "body_complete": true
+              }
+            ],
+            "message_count": 1,
+            "complete": true,
+            "thread_latest_message_from": "them",
+            "messages_omitted": 0
+          },
+          {
+            "thread_id": "example-thread-2",
+            "source_trust": "untrusted",
+            "messages": [
+              {
+                "messageId": "example-message-3",
+                "from": "Example Source <source@example.invalid>",
+                "to": "owner@example.invalid",
+                "subject": "Your sessions at Example Event 2020",
+                "internalDate": "2020-11-01T00:00:00Z",
+                "labelIds": [
+                  "IMPORTANT",
+                  "CATEGORY_UPDATES"
+                ],
+                "body": "Dear Example! We're sorry, but the following sessions have not been accepted for Example Event 2020: - Example Talk One- Example Talk Two Thanks, Example Event 2020 Tip: OMITTED",
+                "body_complete": true
+              }
+            ],
+            "message_count": 1,
+            "complete": true,
+            "thread_latest_message_from": "them",
+            "messages_omitted": 0
+          }
+        ],
+        "next_page_token": "opaque-example-continuation",
+        "threads_omitted": 0,
+        "complete": false,
+        "errors": []
+      }
+    },
+    {
+      "family": "pretalx",
+      "scope": "bounded synthetic structural replay; not a live collection",
+      "observed_at": "2020-12-01T00:00:00Z",
+      "evidence": {
+        "schema_version": 1,
+        "threads": [
+          {
+            "thread_id": "example-thread-3",
+            "source_trust": "untrusted",
+            "messages": [
+              {
+                "messageId": "example-pretalx",
+                "from": "Example Source <source@example.invalid>",
+                "to": "owner@example.invalid",
+                "subject": "Your proposal: Example Talk",
+                "internalDate": "2020-11-01T00:00:00Z",
+                "labelIds": [
+                  "UNREAD",
+                  "IMPORTANT",
+                  "CATEGORY_UPDATES"
+                ],
+                "body": "Hi! We have received your proposal \u201cExample Talk\u201d to Example Event. We will notify you once we have had time to consider all proposals, but until then you can see and edit your proposal at REMOVED. Full proposal content: Proposal title: Example Talk Abstract: OMITTED powered by pretalx",
+                "body_complete": true
+              }
+            ],
+            "message_count": 1,
+            "complete": true,
+            "thread_latest_message_from": "them",
+            "messages_omitted": 0
+          }
+        ],
+        "next_page_token": null,
+        "threads_omitted": 0,
+        "complete": true,
+        "errors": []
+      }
+    },
+    {
+      "family": "oxford",
+      "scope": "bounded synthetic structural replay; not a live collection",
+      "observed_at": "2020-12-01T00:00:00Z",
+      "evidence": {
+        "schema_version": 1,
+        "threads": [
+          {
+            "thread_id": "example-thread-4",
+            "source_trust": "untrusted",
+            "messages": [
+              {
+                "messageId": "example-message-5",
+                "from": "Example Source <source@example.invalid>",
+                "to": "owner@example.invalid",
+                "subject": "Example - Thank you for submitting your proposal to speak at Example",
+                "internalDate": "2020-11-01T00:00:00Z",
+                "labelIds": [
+                  "UNREAD",
+                  "IMPORTANT",
+                  "Label_66",
+                  "CATEGORY_UPDATES"
+                ],
+                "body": "<p>Dear Example,<br/>Thank you for submitting your proposal to speak at <a><strong>Example Event 2020</strong></a>, from 13-15 April 2020 in Example City.<br/>We will review completed proposals and let you know whether your abstract has been accepted for presentation.<br/>Powered by Oxford Abstracts</p>",
+                "body_complete": true
+              },
+              {
+                "messageId": "example-message-6",
+                "from": "Example Source <source@example.invalid>",
+                "to": "owner@example.invalid",
+                "subject": "Example - Thank you for submitting your proposal to speak at Example",
+                "internalDate": "2020-11-01T00:00:00Z",
+                "labelIds": [
+                  "UNREAD",
+                  "IMPORTANT",
+                  "Label_66",
+                  "CATEGORY_PERSONAL"
+                ],
+                "body": "<p>Dear Example,<br/>Thank you for submitting your proposal to speak at <a><strong>Example Event 2020</strong></a>, from 13-15 April 2020 in Example City.<br/>We will review completed proposals and let you know whether your abstract has been accepted for presentation.<br/>Powered by Oxford Abstracts</p>",
+                "body_complete": true
+              },
+              {
+                "messageId": "example-message-7",
+                "from": "Example Source <source@example.invalid>",
+                "to": "owner@example.invalid",
+                "subject": "Example - Thank you for submitting your proposal to speak at Example",
+                "internalDate": "2020-11-01T00:00:00Z",
+                "labelIds": [
+                  "UNREAD",
+                  "IMPORTANT",
+                  "Label_66",
+                  "CATEGORY_PERSONAL"
+                ],
+                "body": "<p>Dear Example,<br/>Thank you for submitting your proposal to speak at <a><strong>Example Event 2020</strong></a>, from 13-15 April 2020 in Example City.<br/>We will review completed proposals and let you know whether your abstract has been accepted for presentation.<br/>Powered by Oxford Abstracts</p>",
+                "body_complete": true
+              }
+            ],
+            "message_count": 3,
+            "complete": true,
+            "thread_latest_message_from": "them",
+            "messages_omitted": 0
+          }
+        ],
+        "next_page_token": "opaque-example-continuation",
+        "threads_omitted": 0,
+        "complete": false,
+        "errors": []
+      }
+    },
+    {
+      "family": "cfpdev",
+      "scope": "bounded synthetic structural replay; not a live collection",
+      "observed_at": "2020-12-01T00:00:00Z",
+      "evidence": {
+        "schema_version": 1,
+        "threads": [
+          {
+            "thread_id": "example-thread-7",
+            "source_trust": "untrusted",
+            "messages": [
+              {
+                "messageId": "example-message-8",
+                "from": "Example Source <source@example.invalid>",
+                "to": "owner@example.invalid",
+                "subject": "[example20] Your talk has been assigned a room for Example Event",
+                "internalDate": "2020-11-01T00:00:00Z",
+                "labelIds": [
+                  "IMPORTANT",
+                  "CATEGORY_UPDATES"
+                ],
+                "body": "Your talk has now been assigned a room! Talk: Example Talk Date: Monday, October 5, 2020 Room: Example Room",
+                "body_complete": true
+              }
+            ],
+            "message_count": 1,
+            "complete": true,
+            "thread_latest_message_from": "them",
+            "messages_omitted": 0
+          },
+          {
+            "thread_id": "example-thread-8",
+            "source_trust": "untrusted",
+            "messages": [
+              {
+                "messageId": "example-message-9",
+                "from": "Example Source <source@example.invalid>",
+                "to": "owner@example.invalid",
+                "subject": "[example20] RSVP Required: Example Event Speakers Reception",
+                "internalDate": "2020-11-01T00:00:00Z",
+                "labelIds": [
+                  "IMPORTANT",
+                  "CATEGORY_UPDATES"
+                ],
+                "body": "Dear Example, We invite you to our Speakers Reception. Registration is mandatory.",
+                "body_complete": true
+              }
+            ],
+            "message_count": 1,
+            "complete": true,
+            "thread_latest_message_from": "them",
+            "messages_omitted": 0
+          },
+          {
+            "thread_id": "example-thread-9",
+            "source_trust": "untrusted",
+            "messages": [
+              {
+                "messageId": "example-message-10",
+                "from": "Example Source <source@example.invalid>",
+                "to": "owner@example.invalid",
+                "subject": "[example20] Backup talk status",
+                "internalDate": "2020-11-01T00:00:00Z",
+                "labelIds": [
+                  "IMPORTANT",
+                  "CATEGORY_UPDATES"
+                ],
+                "body": "Your talk currently marked as Backup for Example Event. We would like to keep your proposal in Backup status.",
+                "body_complete": true
+              }
+            ],
+            "message_count": 1,
+            "complete": true,
+            "thread_latest_message_from": "them",
+            "messages_omitted": 0
+          }
+        ],
+        "next_page_token": "opaque-example-continuation",
+        "threads_omitted": 0,
+        "complete": false,
+        "errors": []
+      }
+    },
+    {
+      "family": "devopsdays",
+      "scope": "bounded synthetic structural replay; not a live collection",
+      "observed_at": "2020-12-01T00:00:00Z",
+      "evidence": {
+        "schema_version": 1,
+        "threads": [
+          {
+            "thread_id": "example-thread-10",
+            "source_trust": "untrusted",
+            "messages": [
+              {
+                "messageId": "example-pretalx",
+                "from": "Example Source <source@example.invalid>",
+                "to": "owner@example.invalid",
+                "subject": "Your proposal: Example Talk",
+                "internalDate": "2020-11-01T00:00:00Z",
+                "labelIds": [
+                  "UNREAD",
+                  "IMPORTANT",
+                  "CATEGORY_UPDATES"
+                ],
+                "body": "Hi! We have received your proposal \u201cExample Talk\u201d to Example Event. We will notify you once we have had time to consider all proposals, but until then you can see and edit your proposal at REMOVED. Full proposal content: Proposal title: Example Talk Abstract: OMITTED powered by pretalx",
+                "body_complete": true
+              }
+            ],
+            "message_count": 1,
+            "complete": true,
+            "thread_latest_message_from": "them",
+            "messages_omitted": 0
+          },
+          {
+            "thread_id": "example-thread-11",
+            "source_trust": "untrusted",
+            "messages": [
+              {
+                "messageId": "example-message-12",
+                "from": "Example Source <source@example.invalid>",
+                "to": "owner@example.invalid",
+                "subject": "Example Event 2020 25-26 May We received your proposal: Example Talk",
+                "internalDate": "2020-11-01T00:00:00Z",
+                "labelIds": [
+                  "IMPORTANT",
+                  "CATEGORY_PERSONAL"
+                ],
+                "body": "Hi Example Speaker, Thank you for submitting \"Example Talk\" to Example Event 2020 25-26 May. You can view, edit, or withdraw your proposal until the CFP closes using your personal link: REMOVED. Keep this link private - anyone who has it can edit the proposal.",
+                "body_complete": true
+              }
+            ],
+            "message_count": 1,
+            "complete": true,
+            "thread_latest_message_from": "them",
+            "messages_omitted": 0
+          },
+          {
+            "thread_id": "example-thread-12",
+            "source_trust": "untrusted",
+            "messages": [
+              {
+                "messageId": "example-message-13",
+                "from": "Example Source <source@example.invalid>",
+                "to": "owner@example.invalid",
+                "subject": "Example Event 2020 25-26 May We received your proposal: Example Talk",
+                "internalDate": "2020-11-01T00:00:00Z",
+                "labelIds": [
+                  "UNREAD",
+                  "IMPORTANT",
+                  "CATEGORY_PERSONAL"
+                ],
+                "body": "Hi Example Speaker, Thank you for submitting \"Example Talk\" to Example Event 2020 25-26 May. You can view, edit, or withdraw your proposal until the CFP closes using your personal link: REMOVED. Keep this link private - anyone who has it can edit the proposal.",
+                "body_complete": true
+              }
+            ],
+            "message_count": 1,
+            "complete": true,
+            "thread_latest_message_from": "them",
+            "messages_omitted": 0
+          }
+        ],
+        "next_page_token": "opaque-example-continuation",
+        "threads_omitted": 0,
+        "complete": false,
+        "errors": []
+      }
+    },
+    {
+      "family": "cfpdev-proposal",
+      "scope": "bounded synthetic structural replay; not a live collection",
+      "observed_at": "2020-12-01T00:00:00Z",
+      "evidence": {
+        "schema_version": 1,
+        "threads": [
+          {
+            "thread_id": "example-thread-13",
+            "source_trust": "untrusted",
+            "messages": [
+              {
+                "messageId": "example-message-14",
+                "from": "Example Source <source@example.invalid>",
+                "to": "owner@example.invalid",
+                "subject": "[example20] Your proposal has been refused : Example Talk",
+                "internalDate": "2020-11-01T00:00:00Z",
+                "labelIds": [
+                  "IMPORTANT",
+                  "CATEGORY_UPDATES"
+                ],
+                "body": "Dear Example, Thank you for submitting your proposal \"Example Talk\" for Example Event 2020. After careful review, we regret to inform you that your talk was not selected for this year\u2019s edition.",
+                "body_complete": true
+              }
+            ],
+            "message_count": 1,
+            "complete": true,
+            "thread_latest_message_from": "them",
+            "messages_omitted": 0
+          },
+          {
+            "thread_id": "example-thread-14",
+            "source_trust": "untrusted",
+            "messages": [
+              {
+                "messageId": "example-message-15",
+                "from": "Example Source <source@example.invalid>",
+                "to": "owner@example.invalid",
+                "subject": "[example20] Your proposal has been accepted : Example Talk",
+                "internalDate": "2020-11-01T00:00:00Z",
+                "labelIds": [
+                  "UNREAD",
+                  "IMPORTANT",
+                  "CATEGORY_UPDATES"
+                ],
+                "body": "Congratulations! We are thrilled to inform you that your Deep Dive proposal, \"Example Talk\", has been accepted for Example Event 2020! Action Required Please confirm on the CFP site: REMOVED.",
+                "body_complete": true
+              }
+            ],
+            "message_count": 1,
+            "complete": true,
+            "thread_latest_message_from": "them",
+            "messages_omitted": 0
+          },
+          {
+            "thread_id": "example-thread-15",
+            "source_trust": "untrusted",
+            "messages": [
+              {
+                "messageId": "example-message-16",
+                "from": "Example Source <source@example.invalid>",
+                "to": "owner@example.invalid",
+                "subject": "[example20] Your proposal Example Talk is marked as backup",
+                "internalDate": "2020-11-01T00:00:00Z",
+                "labelIds": [
+                  "UNREAD",
+                  "IMPORTANT",
+                  "CATEGORY_UPDATES"
+                ],
+                "body": "Thank you for submitting your proposal \"Example Talk\" to Example Event 2020. Your proposal has been selected as a backup talk. You are in our standby lineup should scheduling changes occur.",
+                "body_complete": true
+              }
+            ],
+            "message_count": 1,
+            "complete": true,
+            "thread_latest_message_from": "them",
+            "messages_omitted": 0
+          }
+        ],
+        "next_page_token": "opaque-example-continuation",
+        "threads_omitted": 0,
+        "complete": false,
+        "errors": []
+      }
+    }
+  ]
+}
