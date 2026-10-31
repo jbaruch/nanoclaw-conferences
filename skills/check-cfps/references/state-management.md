@@ -58,6 +58,12 @@ Every CFP record carries its own `schema_version` (currently `1`, introduced wit
 - **Other readers** (`dedup-by-url.py`, `system-audit.py`): operate on version-independent structural fields (`cfp_url`/slug dedup, script inventory), not the `matched_interests` shape, so this version does not gate them.
 - **Migration window:** a pre-#308 file has no `schema_version` on any record; until `check-cfps` next runs (nightly housekeeping or a manual invocation) the reader surfaces no CFPs. `check-cfps`'s deterministic stamper brings every record to `1` on its next run, after which the reader resumes. No data rewrite beyond the stamp is needed — absent `matched_interests` on a version-1 record is already the pinned default.
 
+## Submission-derived `sent` projection
+
+`cfp-submissions` delegates its derived update to this same `scripts/commit-state.py` owner with `--expected-digests FILE --unique-cfp-url URL`. The latter is an optional refusal-only guard, requiring guarded mode and exactly one proposed slug with that reference. Inside the existing advisory lock, exactly that slug must be the sole non-config record whose `cfp_url` equals the supplied reference (ignoring trailing slashes only). A newly added duplicate sibling returns `skipped_changed`, not a write. Fresh `user_actioned` and expected per-record digests retain their existing priority; unrelated records and metadata survive.
+
+If the derived guard refuses with no writes after the file disappeared, it preserves absence rather than initializing `{}`. All callers that omit `--unique-cfp-url` retain their original bootstrap, replacement and output behavior. No new store, nested lock, enum, record schema or mutation authority is introduced. An ambiguous reference needs explicit owner resolution, never a title-based join or direct file rewrite.
+
 ## Freshness heartbeat — `_last_checked`
 
 Top-level `_`-prefixed config field (not a CFP record). The UTC ISO-8601 instant the check-cfps pipeline last ran to completion, **independent of whether any record changed** — a run that re-verified everything and changed nothing still advances it. It answers "did the pipeline run?", which per-record `updated`/`last_verified` cannot: those stay put when nothing changed, so a healthy idle pipeline looks identical to a dead one if you read them alone.

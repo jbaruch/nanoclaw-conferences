@@ -28,7 +28,7 @@ DECLARED = re.compile(r"^/home/node/\.claude/skills/tessl__[a-z0-9-]+/scripts/[A
 
 def _authored_scope() -> list[Path]:
     files: list[Path] = []
-    for skill in ("check-cfps", "nightly-cfp-sync", "conference-followups"):
+    for skill in ("check-cfps", "nightly-cfp-sync", "conference-followups", "cfp-submissions"):
         files.append(REPO_ROOT / "skills" / skill / "SKILL.md")
         files.extend(sorted((REPO_ROOT / "skills" / skill / "references").glob("*.md")))
     return [f for f in files if f.exists()]
@@ -45,6 +45,16 @@ def _mount_paths() -> list[tuple[Path, str]]:
 def test_the_scan_finds_the_command_paths():
     # Positive control: the scan is not vacuous.
     assert len(_mount_paths()) >= 10
+
+
+def test_submissions_skill_and_all_references_are_in_authored_scope():
+    expected = {REPO_ROOT / "skills/cfp-submissions/SKILL.md"}
+    expected.update((REPO_ROOT / "skills/cfp-submissions/references").glob("*.md"))
+    assert expected <= set(_authored_scope())
+    assert any(
+        "cfp-submissions" in str(path) and tail.endswith("scripts/submissions.py")
+        for path, tail in _mount_paths()
+    )
 
 
 def test_every_mount_path_names_a_shipped_skill_script_or_explicit_reference():
