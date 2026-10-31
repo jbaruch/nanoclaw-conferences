@@ -1165,3 +1165,89 @@ def test_search1_valid_retained_latest_metadata_and_unknowns(modules, metadata):
         )
     observations, scopes = source.prepare(packet)
     assert observations and not any(item["complete"] for item in scopes)
+
+
+@pytest.mark.parametrize("excess", [0, 1])
+def test_sessionize_enforces_native_dom_utf8_aggregate_bound(modules, dashboard, excess):
+    source, _ = modules
+    capture = dashboard["capture"]
+    # The Host bounds the compact native DOM before adding its scope metadata.
+    capture["scope"] = "Synthetic captured scope " * 50
+
+    def native_bytes():
+        return len(
+            json.dumps(
+                {key: value for key, value in capture.items() if key != "scope"},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        )
+
+    target = 1_500_000 + excess
+    while target - native_bytes() > 17_000:
+        capture["nodes"].append({"tag": "DIV", "parent": 0, "classes": "", "text": "é" * 8000})
+    padding = {"tag": "DIV", "parent": 0, "classes": "", "text": ""}
+    capture["nodes"].append(padding)
+    padding["text"] = "X" * (target - native_bytes())
+    assert native_bytes() == target
+    if excess:
+        with pytest.raises(source.SourceError, match="capture_bounds"):
+            source.prepare(dashboard)
+    else:
+        observations, scopes = source.prepare(dashboard)
+        assert len(observations) == 51 and scopes[0]["complete"]
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize("damage", ["unexplained_incomplete", "omitted_unknown", "thread_rebound"])
+def test_mail_rejects_impossible_cross_field_relationships(modules, source_version, damage):
+    source, _ = modules
+    packet = hydrated_mail()
+    wrapper = packet["collections"][0]["evidence"]
+    search = wrapper["search"]
+    thread = search["threads"][0]
+    if damage == "unexplained_incomplete":
+        thread["messages"][0]["body_complete"] = True
+        wrapper["body_reads"] = []
+    elif damage == "omitted_unknown":
+        thread.update(
+            message_count=2,
+            messages_omitted=1,
+            thread_latest_message_id="a002",
+            thread_latest_message_date="2020-11-02T00:00:00Z",
+            thread_latest_message_from="unknown",
+        )
+    else:
+        duplicate = deepcopy(packet["collections"][0])
+        moved = duplicate["evidence"]
+        moved["search"]["threads"][0].update(
+            thread_id="b002", citation_url="https://mail.google.com/mail/u/0/#all/b002"
+        )
+        moved["body_reads"][0]["thread_id"] = "b002"
+        moved["body_reads"][0]["evidence"].update(
+            thread_id="b002", citation_url="https://mail.google.com/mail/u/0/#all/b002"
+        )
+        packet["collections"].append(duplicate)
+    packet["schema_version"] = source_version
+    if source_version == 1:
+        for collection in packet["collections"]:
+            collection["evidence"] = collection["evidence"]["search"]
+    with pytest.raises(source.SourceError):
+        source.prepare(packet)
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+def test_mail_preserves_valid_continuation_without_inventing_a_thread_gap(modules, source_version):
+    source, _ = modules
+    packet = hydrated_mail()
+    wrapper = packet["collections"][0]["evidence"]
+    thread = wrapper["search"]["threads"][0]
+    thread["messages"][0]["body_complete"] = thread["complete"] = True
+    wrapper["body_reads"] = []
+    # A noninitial query page can have no local gaps and still be globally incomplete.
+    assert not wrapper["search"]["complete"]
+    packet["schema_version"] = source_version
+    if source_version == 1:
+        packet["collections"][0]["evidence"] = wrapper["search"]
+    observations, scopes = source.prepare(packet)
+    assert observations and not any(item["complete"] for item in scopes)

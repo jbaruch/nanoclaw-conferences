@@ -28,6 +28,7 @@ from html.parser import HTMLParser
 from urllib.parse import urlsplit
 
 MAX_NODES = 12000
+MAX_CAPTURE_BYTES = 1_500_000
 MAX_MESSAGES = 1000
 MAX_BODY = 256 * 1024
 MAX_CLAIM_TEXT = 300
@@ -357,6 +358,14 @@ def sessionize(request):
         )
         if parent is not None:
             children[parent].append(i)
+    # Host checks JSON.stringify(dom) before attaching its scope metadata.
+    # Validated native values have no floating-point or unsupported string forms.
+    native_dom = {key: value for key, value in capture.items() if key != "scope"}
+    require(
+        len(json.dumps(native_dom, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        <= MAX_CAPTURE_BYTES,
+        "capture_bounds",
+    )
 
     def descendants(index):
         result, pending = [], [index]
@@ -812,13 +821,16 @@ def mail_search(search):
             require(latest_date is None, "mail_latest_metadata")
         elif not thread["messages_omitted"]:
             require(latest_date is not None, "mail_latest_metadata")
+        malformed_payload = False
         for error in errors:
             if error.get("thread_id") == tid:
+                malformed_payload = error["kind"] == "malformed_payload"
                 require(
                     error["kind"] == "malformed_payload" and not thread["complete"],
                     "mail_thread_coverage",
                 )
         if latest_id is not None:
+            require(direction in {"me", "them"}, "mail_latest_metadata")
             retained = next((item for item in dated if item[1] == latest_id), None)
             require(retained is not None or thread["messages_omitted"] > 0, "mail_latest_metadata")
             if retained is not None:
@@ -828,8 +840,8 @@ def mail_search(search):
                     and retained[2] == direction,
                     "mail_latest_metadata",
                 )
-        thread_gap = undated or body_gap or bool(thread["messages_omitted"])
-        require(not thread["complete"] or not thread_gap, "mail_thread_coverage")
+        thread_gap = undated or body_gap or bool(thread["messages_omitted"]) or malformed_payload
+        require(thread["complete"] == (not thread_gap), "mail_thread_coverage")
         gap |= not thread["complete"] or thread_gap
     require(not search["complete"] or not gap, "mail_search_coverage")
     return originals, pending
@@ -998,6 +1010,7 @@ def mail(request):
                 if prior is None:
                     seen[identifier] = {
                         "fingerprint": fingerprint,
+                        "thread_id": thread["thread_id"],
                         "fields": fields,
                         "clock": clock,
                         "observed_at": observed_at,
@@ -1005,7 +1018,11 @@ def mail(request):
                         "complete": body_complete,
                     }
                 else:
-                    require(prior["fingerprint"] == fingerprint, "mail_identity_conflict")
+                    require(
+                        prior["fingerprint"] == fingerprint
+                        and prior["thread_id"] == thread["thread_id"],
+                        "mail_identity_conflict",
+                    )
                     for field, value in fields.items():
                         require(
                             field not in prior["fields"] or prior["fields"][field] == value,

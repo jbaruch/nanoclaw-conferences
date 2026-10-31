@@ -1041,3 +1041,33 @@ def test_real_owner_finite_failure_recovery(ledger, tmp_path, monkeypatch, failu
     assert "PRIVATE" not in str(caught.value) and str(state) not in str(caught.value)
     assert "exit_status=1" in str(caught.value)
     assert state.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "counts",
+    [(1, 1, []), (1, 0, ["event"]), (0, 1, ["event"]), (1, 1, ["event"]), (0, 0, [])],
+)
+def test_single_slug_owner_refuses_contradictory_or_missing_outcomes(
+    ledger, observation, cfp, tmp_path, monkeypatch, counts
+):
+    path, cfp_path = tmp_path / "ledger", tmp_path / "cfp"
+    ledger.record(path, observation)
+    write(cfp_path, {"event": cfp})
+    before = cfp_path.read_bytes()
+    original = ledger.owner_call
+
+    def owner_reply(owner, arguments, value):
+        if arguments == ["--snapshot"]:
+            return original(owner, arguments, value)
+        written, user_actioned, changed = counts
+        return {
+            "written": written,
+            "skipped_user_actioned": user_actioned,
+            "total_records": 1,
+            "skipped_changed": changed,
+        }
+
+    monkeypatch.setattr(ledger, "owner_call", owner_reply)
+    with pytest.raises(ledger.Hold, match="cfp_owner_result"):
+        ledger.reconcile(path, cfp_path, {"identity": observation["identity"], "slug": "event"})
+    assert cfp_path.read_bytes() == before

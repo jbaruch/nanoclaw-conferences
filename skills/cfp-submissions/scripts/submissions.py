@@ -868,7 +868,12 @@ def reconcile(path, cfp_path, request, expected_ledger_sha256=None):
         or not 0 <= response["written"] <= 1
         or not 0 <= response["skipped_user_actioned"] <= 1
         or not 0 <= response["total_records"] <= sys.maxsize
-        or response["skipped_changed"] not in ([], [request["slug"]])
+        or (
+            response["written"],
+            response["skipped_user_actioned"],
+            response["skipped_changed"],
+        )
+        not in ((1, 0, []), (0, 1, []), (0, 0, [request["slug"]]))
     ):
         raise Hold("cfp_owner_result; inspect the existing owner result; do not replay blindly")
     outcome = "sent" if response["written"] == 1 else "conflict"
