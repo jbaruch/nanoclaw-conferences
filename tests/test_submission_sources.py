@@ -1635,3 +1635,100 @@ def test_native_two_stage_failure_pair_is_consecutive(modules, source_version, i
     else:
         observations, scopes = source.prepare(packet)
         assert len(observations) == 1 and not scopes[0]["complete"]
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize("damage", ["earlier_omitted", "retained_reversed"])
+def test_malformed_search_errors_preserve_retained_prefix(modules, source_version, damage):
+    source, _ = modules
+    packet = failed_stub_packet(
+        source_version,
+        2,
+        0,
+        [{"kind": "malformed_payload", "thread_id": tid} for tid in ("b000", "b001")],
+    )
+    evidence = packet["collections"][0]["evidence"]
+    search = evidence["search"] if source_version == 2 else evidence
+    for thread in search["threads"]:
+        thread["complete"] = False
+    if damage == "earlier_omitted":
+        search["threads"].pop(0)
+        search["threads_omitted"] = 1
+    else:
+        search["errors"].reverse()
+    with pytest.raises(source.SourceError, match="mail_search_coverage"):
+        source.prepare(packet)
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+def test_malformed_search_suffix_omission_remains_supported(modules, source_version):
+    source, _ = modules
+    packet = failed_stub_packet(
+        source_version,
+        2,
+        0,
+        [{"kind": "malformed_payload", "thread_id": tid} for tid in ("b000", "b001")],
+    )
+    evidence = packet["collections"][0]["evidence"]
+    search = evidence["search"] if source_version == 2 else evidence
+    search["threads"][0]["complete"] = False
+    search["threads"].pop()
+    search["threads_omitted"] = 1
+    observations, scopes = source.prepare(packet)
+    assert len(observations) == 1 and not scopes[0]["complete"]
+
+
+def ordered_hydrated_mail():
+    packet = hydrated_mail()
+    wrapper = packet["collections"][0]["evidence"]
+    first_thread, first_read = wrapper["search"]["threads"][0], wrapper["body_reads"][0]
+    for tid, mid in (("b002", "a002"), ("b003", "a003")):
+        thread, read = deepcopy(first_thread), deepcopy(first_read)
+        citation = f"https://mail.google.com/mail/u/0/#all/{tid}"
+        thread.update(thread_id=tid, citation_url=citation, thread_latest_message_id=mid)
+        thread["messages"][0]["messageId"] = mid
+        read.update(message_id=mid, thread_id=tid)
+        read["evidence"].update(message_id=mid, thread_id=tid, citation_url=citation)
+        wrapper["search"]["threads"].append(thread)
+        wrapper["body_reads"].append(read)
+    return packet
+
+
+@pytest.mark.parametrize("damage", ["earlier_aggregate", "read_order", "error_order"])
+def test_hydration_preserves_candidate_order_and_aggregate_suffix(modules, damage):
+    source, _ = modules
+    packet = ordered_hydrated_mail()
+    wrapper = packet["collections"][0]["evidence"]
+    if damage == "earlier_aggregate":
+        wrapper["body_reads"].pop(0)
+        wrapper["errors"] = [{"message_id": "a001", "kind": "aggregate_limit"}]
+        wrapper["body_reads_omitted"] = 1
+    elif damage == "read_order":
+        wrapper["body_reads"].reverse()
+    else:
+        wrapper["body_reads"] = wrapper["body_reads"][:1]
+        wrapper["errors"] = [
+            {"message_id": mid, "kind": "body_unavailable"} for mid in ("a003", "a002")
+        ]
+        wrapper["body_reads_omitted"] = 2
+    with pytest.raises(source.SourceError, match="mail_handoff_coverage"):
+        source.prepare(packet)
+
+
+@pytest.mark.parametrize("failure_first", [False, True])
+def test_hydration_suffix_omission_preserves_independent_failures(modules, failure_first):
+    source, _ = modules
+    packet = ordered_hydrated_mail()
+    wrapper = packet["collections"][0]["evidence"]
+    failed, retained = ("a001", "a002") if failure_first else ("a002", "a001")
+    wrapper["body_reads"] = [
+        read for read in wrapper["body_reads"] if read["message_id"] == retained
+    ]
+    wrapper["errors"] = [
+        {"message_id": failed, "kind": "body_unavailable"},
+        {"message_id": "a003", "kind": "aggregate_limit"},
+    ]
+    wrapper["body_reads_omitted"] = 2
+    observations, scopes = source.prepare(packet)
+    assert len(observations) == 3 and not scopes[0]["complete"]
+    assert sum(item["fact"]["complete"] for item in observations) == 1

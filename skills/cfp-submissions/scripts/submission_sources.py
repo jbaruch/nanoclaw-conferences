@@ -902,6 +902,19 @@ def mail_search(search):
         thread_gap = undated or body_gap or bool(thread["messages_omitted"]) or malformed_payload
         require(thread["complete"] == (not thread_gap), "mail_thread_coverage")
         gap |= not thread["complete"] or thread_gap
+    # Errors retain stub order even after byte-cap trimming removes a suffix
+    # of successfully parsed threads. Only payload-only groups were parsed;
+    # payload+parser failures never entered the producer's retained inventory.
+    positions = {thread["thread_id"]: index for index, thread in enumerate(threads)}
+    previous, suffix_started = -1, False
+    for tid, stages in failed_stubs.items():
+        if stages != {"malformed_payload"}:
+            continue
+        if tid not in positions:
+            suffix_started = True
+        else:
+            require(not suffix_started and positions[tid] > previous, "mail_search_coverage")
+            previous = positions[tid]
     dropped_malformed = sum(
         tid not in tids and stages == {"malformed_payload"} for tid, stages in failed_stubs.items()
     )
@@ -998,6 +1011,20 @@ def mail_handoff(wrapper):
             "mail_handoff_error",
         )
         errors[mid] = error["kind"]
+    # The collector walks incomplete search messages in their retained order.
+    # Fetch failures do not enter body_reads; aggregate trimming pops only the
+    # suffix of successful reads, including any previously incomplete bodies.
+    require(
+        list(reads) == [mid for mid in pending if mid in reads]
+        and list(errors) == [mid for mid in pending if mid in errors],
+        "mail_handoff_coverage",
+    )
+    suffix_started = False
+    for mid in pending:
+        if errors.get(mid) == "aggregate_limit":
+            suffix_started = True
+        elif mid in reads:
+            require(not suffix_started, "mail_handoff_coverage")
     omitted = set(pending) - set(reads)
     partial = {mid for mid, full in reads.items() if not full["body_complete"]}
     require(
