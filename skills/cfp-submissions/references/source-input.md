@@ -6,6 +6,12 @@ These adapters parse structures; they do not authenticate caller-supplied JSON, 
 
 ## Sessionize
 
+The installed `jbaruch/nanoclaw-host` rule `rules/sessionize-rendered-capture.md`
+and complete `skills/host-contracts/references/sessionize-rendered-capture.md`
+govern collection. Follow Step1's verified provider lookup in the submissions
+skill; its fixed no-argument capture owner returns this packet unchanged.
+Missing or held collection supplies no empty result or source-completeness proof.
+
 Exact outer fields:
 
 ```json
