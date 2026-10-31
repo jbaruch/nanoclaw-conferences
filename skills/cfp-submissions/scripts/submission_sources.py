@@ -947,6 +947,7 @@ def mail(request):
     collections = request["collections"]
     require(isinstance(collections, list) and 1 <= len(collections) <= 20, "mail_capture_bounds")
     observations, scopes, seen, count = [], [], {}, 0
+    native_threads = {}
     for capture in collections:
         require(
             isinstance(capture, dict)
@@ -980,6 +981,20 @@ def mail(request):
                 "mail_messages",
             )
             require(type(thread.get("complete")) is bool, "mail_thread_coverage")
+            # Latest IDs describe native identities even when their messages
+            # are omitted from the retained body list.
+            for native_id in [
+                thread["thread_latest_message_id"],
+                *(message["messageId"] for message in thread["messages"]),
+            ]:
+                if native_id is None:
+                    continue
+                require(
+                    native_id not in native_threads
+                    or native_threads[native_id] == thread["thread_id"],
+                    "mail_identity_conflict",
+                )
+                native_threads[native_id] = thread["thread_id"]
             if not thread["complete"] or thread.get("messages_omitted"):
                 gaps.append("thread incomplete or messages omitted")
             for message in thread["messages"]:
@@ -1010,7 +1025,6 @@ def mail(request):
                 if prior is None:
                     seen[identifier] = {
                         "fingerprint": fingerprint,
-                        "thread_id": thread["thread_id"],
                         "fields": fields,
                         "clock": clock,
                         "observed_at": observed_at,
@@ -1018,11 +1032,7 @@ def mail(request):
                         "complete": body_complete,
                     }
                 else:
-                    require(
-                        prior["fingerprint"] == fingerprint
-                        and prior["thread_id"] == thread["thread_id"],
-                        "mail_identity_conflict",
-                    )
+                    require(prior["fingerprint"] == fingerprint, "mail_identity_conflict")
                     for field, value in fields.items():
                         require(
                             field not in prior["fields"] or prior["fields"][field] == value,

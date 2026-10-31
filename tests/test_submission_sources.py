@@ -1251,3 +1251,51 @@ def test_mail_preserves_valid_continuation_without_inventing_a_thread_gap(module
         packet["collections"][0]["evidence"] = wrapper["search"]
     observations, scopes = source.prepare(packet)
     assert observations and not any(item["complete"] for item in scopes)
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize(
+    "relationship", ["omitted_retained", "retained_omitted", "omitted_omitted"]
+)
+def test_latest_omitted_mail_ids_keep_global_native_thread_binding(
+    modules, source_version, relationship
+):
+    source, _ = modules
+    packet = hydrated_mail(missing=True)
+    first = packet["collections"][0]
+    second = deepcopy(first)
+    packet["collections"].append(second)
+    for collection, tid, mid in ((first, "b001", "a001"), (second, "b002", "a002")):
+        wrapper = collection["evidence"]
+        thread = wrapper["search"]["threads"][0]
+        thread["messages"][0]["messageId"] = mid
+        wrapper["errors"][0]["message_id"] = mid
+        thread.update(
+            thread_id=tid,
+            citation_url=f"https://mail.google.com/mail/u/0/#all/{tid}",
+            thread_latest_message_id=mid,
+        )
+    if relationship == "omitted_retained":
+        omitted, repeated = first, "a002"
+    elif relationship == "retained_omitted":
+        omitted, repeated = second, "a001"
+    else:
+        omitted, repeated = first, "a003"
+        second["evidence"]["search"]["threads"][0].update(
+            message_count=2,
+            messages_omitted=1,
+            thread_latest_message_id=repeated,
+            thread_latest_message_date="2020-11-02T00:00:00Z",
+        )
+    omitted["evidence"]["search"]["threads"][0].update(
+        message_count=2,
+        messages_omitted=1,
+        thread_latest_message_id=repeated,
+        thread_latest_message_date="2020-11-02T00:00:00Z",
+    )
+    packet["schema_version"] = source_version
+    if source_version == 1:
+        for collection in packet["collections"]:
+            collection["evidence"] = collection["evidence"]["search"]
+    with pytest.raises(source.SourceError, match="mail_identity_conflict"):
+        source.prepare(packet)

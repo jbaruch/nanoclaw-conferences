@@ -1071,3 +1071,36 @@ def test_single_slug_owner_refuses_contradictory_or_missing_outcomes(
     with pytest.raises(ledger.Hold, match="cfp_owner_result"):
         ledger.reconcile(path, cfp_path, {"identity": observation["identity"], "slug": "event"})
     assert cfp_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("counts", [(1, 0, []), (0, 1, []), (0, 0, ["event"])])
+def test_single_slug_record_count_matches_the_retained_outcome(
+    ledger, observation, cfp, tmp_path, monkeypatch, counts
+):
+    path, cfp_path = tmp_path / "ledger", tmp_path / "cfp"
+    ledger.record(path, observation)
+    write(cfp_path, {"event": cfp})
+    before = cfp_path.read_bytes()
+    original = ledger.owner_call
+
+    def owner_reply(owner, arguments, value):
+        if arguments == ["--snapshot"]:
+            return original(owner, arguments, value)
+        written, user_actioned, changed = counts
+        return {
+            "written": written,
+            "skipped_user_actioned": user_actioned,
+            "total_records": 0,
+            "skipped_changed": changed,
+        }
+
+    monkeypatch.setattr(ledger, "owner_call", owner_reply)
+    request = {"identity": observation["identity"], "slug": "event"}
+    if counts[2]:
+        # A deleted target can legitimately cause the guarded changed-reference refusal.
+        result = ledger.reconcile(path, cfp_path, request)
+        assert result["outcome"] == "conflict" and result["owner_result"]["total_records"] == 0
+    else:
+        with pytest.raises(ledger.Hold, match="cfp_owner_result"):
+            ledger.reconcile(path, cfp_path, request)
+    assert cfp_path.read_bytes() == before

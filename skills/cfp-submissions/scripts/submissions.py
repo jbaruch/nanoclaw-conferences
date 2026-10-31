@@ -868,6 +868,8 @@ def reconcile(path, cfp_path, request, expected_ledger_sha256=None):
         or not 0 <= response["written"] <= 1
         or not 0 <= response["skipped_user_actioned"] <= 1
         or not 0 <= response["total_records"] <= sys.maxsize
+        or (response["written"] or response["skipped_user_actioned"])
+        and response["total_records"] == 0
         or (
             response["written"],
             response["skipped_user_actioned"],
