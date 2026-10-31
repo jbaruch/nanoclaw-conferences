@@ -940,3 +940,75 @@ def test_single_slug_owner_result_contract_refuses_malformed_counts(
     with pytest.raises(ledger.Hold, match="cfp_owner_result"):
         ledger.reconcile(path, cfp_path, {"identity": observation["identity"], "slug": "event"})
     assert cfp_path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "stderr,expected",
+    [
+        (
+            "commit-state: could not acquire PRIVATE-PATH within 0s — "
+            "another cfp-state writer holds it",
+            "cfp_owner_busy",
+        ),
+        (
+            "commit-state: cannot read PRIVATE-PATH: JSONDecodeError: PRIVATE-DATA",
+            "cfp_owner_damaged",
+        ),
+        (
+            "commit-state: cannot read PRIVATE-PATH: PermissionError: [Errno 13] PRIVATE-DATA",
+            "cfp_owner_permission",
+        ),
+        (
+            "commit-state: cannot write PRIVATE-PATH: OSError: [Errno 28] PRIVATE-DATA",
+            "cfp_owner_write",
+        ),
+        ("/python: can't open file PRIVATE-PATH: [Errno 2] PRIVATE-DATA", "cfp_owner_installation"),
+        ("UNKNOWN PRIVATE-DATA", "cfp_owner_failed"),
+    ],
+)
+def test_owner_failure_categories_are_actionable_without_raw_stderr(
+    ledger, monkeypatch, stderr, expected
+):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        ledger.subprocess,
+        "run",
+        lambda *a, **k: SimpleNamespace(returncode=1, stdout="", stderr=stderr),
+    )
+    with pytest.raises(ledger.Hold, match=expected) as caught:
+        ledger.owner_call(Path("unused-owner"), [], {})
+    assert "PRIVATE" not in str(caught.value) and "exit_status=1" in str(caught.value)
+
+
+def test_actual_owner_lock_contention_is_not_a_backup_repair(
+    ledger, observation, cfp, tmp_path, monkeypatch
+):
+    import fcntl
+
+    state, expected = tmp_path / "cfp.json", tmp_path / "expected.json"
+    write(state, {"event": cfp})
+    owner = ledger.cfp_owner()
+    fingerprint = ledger.owner_call(owner, ["--snapshot"], {"event": cfp})
+    write(expected, fingerprint)
+    fd = os.open(state.with_name(state.name + ".lock"), os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        monkeypatch.setenv("CFP_STATE_LOCK_TIMEOUT", "0")
+        before = state.read_bytes()
+        with pytest.raises(ledger.Hold, match="cfp_owner_busy") as caught:
+            ledger.owner_call(
+                owner,
+                [
+                    "--state",
+                    str(state),
+                    "--expected-digests",
+                    str(expected),
+                    "--unique-cfp-url",
+                    cfp["cfp_url"],
+                ],
+                {"event": {**cfp, "status": "sent"}},
+            )
+        assert state.read_bytes() == before and "backup" not in str(caught.value)
+    finally:
+        os.close(fd)

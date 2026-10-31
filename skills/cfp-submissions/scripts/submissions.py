@@ -8,7 +8,7 @@ manual: same input, restricted to an owner-declared fact and owner citation.
 query: {start: ISO date, end: ISO date} (inclusive event-date overlap).
 history: same range, also returns known inactive submission history.
 bind: {identity: <identity>, evidence_id, owner_binding: <binding1>}.
-import: source1 Sessionize rendered-tree or maintained mail packet; all
+import: source1 Sessionize/search-mail or source2 hydrated mail packet; all
         observations/coverage validate before one ledger commit. Result has
         recorded/changed/observations/identities_resolved/ledger_sha256.
 reconcile: {identity: <identity>, slug: <existing exact CFP slug>}.
@@ -660,6 +660,47 @@ def cfp_owner():
     raise Hold("cfp_owner_unavailable; reinstall the complete Conferences plugin")
 
 
+def owner_failure(returncode, stderr):
+    """Classify bounded maintained-owner diagnostics without returning paths/data."""
+    if type(returncode) is not int or not -255 <= returncode <= 255:
+        raise RuntimeError("unexpected_owner_exit_status")
+    code, recovery = "cfp_owner_failed", "Inspect actual owner results before any explicit retry."
+    if len(stderr.encode("utf-8", errors="backslashreplace")) <= 4096:
+        if stderr.startswith("commit-state: could not acquire "):
+            code, recovery = "cfp_owner_busy", "Wait for the active CFP writer to finish."
+        elif stderr.startswith(("commit-state: cannot read ", "commit-state: cannot write ")):
+            if ": PermissionError:" in stderr:
+                code, recovery = (
+                    "cfp_owner_permission",
+                    "Restore owner access; preserve retained state.",
+                )
+            elif ": JSONDecodeError:" in stderr or ": UnicodeDecodeError:" in stderr:
+                code, recovery = (
+                    "cfp_owner_damaged",
+                    "Inspect the existing owner's supported backup.",
+                )
+            elif stderr.startswith("commit-state: cannot write "):
+                code, recovery = (
+                    "cfp_owner_write",
+                    "Inspect disk/write failure and actual state before retry.",
+                )
+            else:
+                code, recovery = "cfp_owner_read", "Inspect state/snapshot read access and format."
+        elif stderr.startswith(
+            ("commit-state: cannot create lock file ", "commit-state: cannot lock ")
+        ):
+            code, recovery = (
+                "cfp_owner_lock_access",
+                "Inspect lock-directory access and filesystem locking.",
+            )
+        elif ": can't open file " in stderr or stderr.startswith("usage:"):
+            code, recovery = (
+                "cfp_owner_installation",
+                "Restore the complete supported owner installation.",
+            )
+    raise Hold(f"{code}; {recovery} exit_status={returncode}")
+
+
 def owner_call(owner, arguments, value):
     completed = subprocess.run(
         [sys.executable, str(owner), *arguments],
@@ -669,7 +710,7 @@ def owner_call(owner, arguments, value):
         timeout=45,
     )
     if completed.returncode:
-        raise Hold("cfp_owner_hold; retain the ledger; inspect the supported CFP owner backup")
+        owner_failure(completed.returncode, completed.stderr)
     try:
         result = decode(completed.stdout)
     except json.JSONDecodeError as error:

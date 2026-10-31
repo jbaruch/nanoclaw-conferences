@@ -31,7 +31,9 @@ Invoke the installed mail evidence owner in genuine registered Main:
 Skill(skill: "ask-my-data")
 ```
 
-Request bounded read-only confirmation/decision collection for the requested source/window. Require the owner-produced schema1 evidence envelope, actual message IDs and bound `internalDate`, complete sanitized bodies, body completeness, query scope and continuation/omission/error facts described by source-input.md. A narrative answer or clipped evidence is not that handoff; preserve the gap and do not manufacture a packet. Read the complete governing Admin Google-access contract before collection. Never construct Main roles/env, read credentials, use direct Gmail HTTP or turn candidate search results into submission proof.
+Resolve the declared `jbaruch/nanoclaw-admin` provider in the installed registry (native `/workspace/project/tessl-workspace/.tessl/plugins/jbaruch/nanoclaw-admin`; authoring `.tessl/plugins/jbaruch/nanoclaw-admin`). Read its manifest, declared `rules/google-access.md` with `mailEvidenceContract: admin-mail-evidence-v1`, complete `skills/admin-contracts/references/google-access.md` and `skills/ask-my-data/references/mail-evidence.md`. Missing, unsupported or unreadable authority holds mail collection; do not substitute a narrative answer or invent an installed action.
+
+Request the typed `mail-evidence` action with the actual query and optional limit/page_token JSON. The provider owns its fixed `collect-mail-evidence.py` invocation, maintained full-body hydration and unchanged JSON return. Follow the full reference rather than importing private helpers or reconstructing messages. Wrap the returned wrapper1 unchanged in the documented mail source2 collection. Preserve all search/thread/pagination/omission/error gaps even when a bound full body is complete. Legacy source1 remains accepted only with its unchanged search1 evidence. Never construct Main roles/env, read credentials, use direct Gmail HTTP or turn candidate search results into submission proof.
 
 For Sessionize, resolve the declared `jbaruch/nanoclaw-host` provider through the normal project registry. Source authoring uses its actual `.tessl/plugins/jbaruch/nanoclaw-host` installation; genuine native Main reads the provider at `/workspace/project/tessl-workspace/.tessl/plugins/jbaruch/nanoclaw-host`. These are installed-provider locations, never caller path selectors or source-checkout substitutes.
 
@@ -39,7 +41,7 @@ Verify the provider manifest identity and declaration of `rules/sessionize-rende
 
 Use only actual Main and the existing signed-in My Events page. Missing, denied, changed or unsupported installed authority or capture holds visibly; it is never an empty import. Do not substitute endpoints, roles, targets or accounts, bypass held slots, navigate/edit/submit, or read forms/values/storage/cookies. Pass the returned source1 packet unchanged. The adapter verifies the observed account/filter/count/status/native-link structure; it does not authenticate a supplied capture or establish complete history.
 
-Write the documented source1 packet to a private invocation file; no raw private capture or personal control link goes into public source/fixtures.
+Write the documented source1 Sessionize or source2 mail packet to a private invocation file; no raw private capture or personal control link goes into public source/fixtures.
 
 ```bash
 python3 /home/node/.claude/skills/tessl__cfp-submissions/scripts/submissions.py import < /tmp/cfp-submission-source.json

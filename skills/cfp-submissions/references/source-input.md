@@ -1,4 +1,4 @@
-# Submission source1 inputs
+# Submission source inputs
 
 Owner: `cfp-submissions/scripts/submission_sources.py`, called only by the co-shipped `submissions.py import` action. One bounded JSON stdin packet, no network calls. The owner validates all proposed facts, all retained state and all coverage before one ledger publication. Raw captures are private invocation input, not another durable store. Do not retain complete messages, raw DOM, private edit URLs or credentials in the ledger.
 
@@ -29,6 +29,8 @@ Exact outer fields:
   }
 }
 ```
+
+The consumer validates the complete declared Host node shape before extracting any observation: required/allowed keys, native UTF-16 bounds, tag and link grammar, omitted-link booleans, mutually exclusive link fields and eligible normalized text. Unsupported or unassigned Unicode text holds without rewriting it. These are syntax/content checks, not proof that supplied JSON came from the provider.
 
 `nodes` is the complete rendered DOM tree in preorder. Parser limits are owned by `skills/cfp-submissions/scripts/submission_sources.py` — `MAX_NODES`, `MAX_MESSAGES`, `MAX_BODY`; the CLI input cap is `MAX_INPUT` in `skills/cfp-submissions/scripts/submissions.py`. Each node has `tag`, `parent` (a preceding integer index, root null), `classes` and direct visible `text`; contained non-edit links may additionally have `href`. Values/attributes from forms, hidden DOM, storage, cookies, credential/profile exports and query/fragment-bearing links are excluded by the collector. `link_omitted:true` may describe an intentionally omitted link; its missing target supplies no identity.
 
@@ -64,7 +66,38 @@ Exact outer fields:
 }
 ```
 
+This source1 format is retained unchanged for previously collected search1 evidence. New full-hydration collection uses source2 below.
+
 `evidence` is the maintained Admin search-mail schema1 envelope. Preserve each thread's `messages`, `complete`, `messages_omitted`; each message's actual `messageId`, `subject`, bound `internalDate`, complete sanitized `body` and `body_complete`. Keep other owner-returned fields unchanged in the private packet. A full-body helper without its identity-matched search date is insufficient; never substitute collection time. No continuation token or error text is copied into coverage: only finite gaps are retained. Collection and message limits are owned by the named script constants and the `mail` input validator. Split at actual collection boundaries without calling an incomplete scope complete.
+
+
+### Full-body handoff: mail source2
+
+The installed Admin Google-access declaration `mailEvidenceContract: admin-mail-evidence-v1` and complete `skills/ask-my-data/references/mail-evidence.md` govern the typed `ask-my-data` `mail-evidence` action. Step1 in the submissions skill resolves and reads that authority. The provider returns wrapper1 unchanged; do not import its private helpers, reinterpret a narrative answer as JSON, or hydrate an old search1 object in place.
+
+Source2 retains the same `source:"mail"`, `collections` and collection fields shown above, but sets the outer `schema_version` to2. Each collection's `evidence` is exactly the provider's wrapper1:
+
+```json
+{
+  "schema_version": 1,
+  "search": {
+    "schema_version": 1,
+    "threads": [],
+    "next_page_token": null,
+    "threads_omitted": 0,
+    "complete": true,
+    "errors": []
+  },
+  "body_reads": [],
+  "body_reads_omitted": 0,
+  "complete": true,
+  "errors": []
+}
+```
+
+Each body read carries `message_id`, `thread_id`, `internalDate` and `evidence` (the unchanged fetch-mail-body1 result). The source owner `submission_sources.py` — `mail_handoff`, its named mail bounds/error constants and `mail` — validates the complete wrapper, original incomplete-message membership, unique native bindings, unchanged fetch shape, bounded bytes and omission/error accounting before the ledger owner can commit. Unsupported versions, contradictory bindings or malformed aggregate coverage hold the entire import; an earlier valid collection cannot partially commit.
+
+Only a provider-bound complete body can supply complete per-message content evidence. The original search object remains unchanged, including prefixes and every search/thread/body/pagination/omission/error gap. Hydration never repairs query coverage or supplies a collection-clock message date. Failed/oversized/missing or incomplete body reads retain their explicit gaps. Source1 is not retagged, and neither input format changes ledger1. JSON validation supplies no runtime Main identity, source authentication or native acceptance.
 
 `family` selects one of the source adapter's `FAMILIES` inputs; it supplies no authentication or claim by itself. Recognized template fields and unsupported cases are owned by `skills/cfp-submissions/scripts/submission_sources.py` — `mail_fields`, `oxford_claim` and `own_form_claim`. Preserve the source owner output; do not preclassify ambiguous prose or create a guessed proposal identity. Recognized confirmations/decisions produce cited claims; unmatched templates retain unknown status. Available historical mail date/city claims remain in facts and do not certify current event dates/city. Multiple generic confirmations are observations, not identified talk counts.
 

@@ -522,3 +522,476 @@ def test_rejects_nonproducer_mail_ids(modules, mail, identifier):
     collection["evidence"]["threads"][0]["messages"][0]["messageId"] = identifier
     with pytest.raises(source.SourceError):
         source.prepare({"schema_version": 1, "source": "mail", "collections": [collection]})
+
+
+@pytest.mark.parametrize("template", ["sessionize", "own-form", "oxford", "refused", "accepted"])
+@pytest.mark.parametrize("long_field", ["first", "second"])
+def test_body_template_overlong_fields_remain_unknown(modules, template, long_field):
+    source, _ = modules
+    first = "X" * 301 if long_field == "first" else "Example Talk"
+    second = "Y" * 301 if long_field == "second" else "Example Event"
+    if template == "sessionize":
+        subject = "Your proposal: " + first
+        body = f"We have received your proposal “{first}” to {second}. We will notify you"
+    elif template == "own-form":
+        subject = f"{second} We received your proposal: {first}"
+        body = f'Thank you for submitting "{first}" to {second}. You can view, edit, or withdraw'
+    elif template == "oxford":
+        subject = "Thank you for submitting your proposal"
+        body = (
+            f"Thank you for submitting your proposal to speak at {first} , from {second}. "
+            "We will review completed proposals. Oxford Abstracts"
+        )
+    elif template == "refused":
+        subject = f"[example] Your proposal has been refused : {first}"
+        body = (
+            f'Thank you for submitting your proposal "{first}" for {second}. '
+            "your talk was not selected"
+        )
+    else:
+        subject = f"[example] Your proposal has been accepted : {first}"
+        body = f'proposal, "{first}", has been accepted for {second}!'
+    assert source.mail_fields("pretalx", subject, body) == {}
+
+
+def test_body_template_exact_field_bound_retains_positive_claim(modules):
+    source, _ = modules
+    title, event = "T" * 300, "E" * 300
+    fields = source.mail_fields(
+        "pretalx",
+        "Your proposal: " + title,
+        f"We have received your proposal “{title}” to {event}. We will notify you",
+    )
+    assert fields == {"talk_title": title, "event_name": event, "status": "submitted"}
+
+
+def test_repeated_untrusted_delimiters_cannot_stall_source_import():
+    import subprocess
+    import sys
+
+    # A separate process bounds a security regression without hanging the suite.
+    # This is a generous completion limit, not a timing/throughput benchmark.
+    program = r"""
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from submission_sources import mail_fields
+cases = [
+    ("Your proposal: Example", "We have received your proposal “" + "” to x " * 30000),
+    ("Thank you for submitting your proposal",
+     "Thank you for submitting your proposal to speak at "
+     + " from x " * 25000 + " Oxford Abstracts"),
+]
+print(json.dumps([mail_fields("pretalx", subject, body) for subject, body in cases]))
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", program, str(SCRIPTS)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=True,
+    )
+    assert json.loads(result.stdout) == [{}, {}]
+    assert not result.stderr
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "missing_root_parent",
+        "missing_classes",
+        "missing_tag",
+        "missing_text",
+        "extra",
+        "tag",
+        "text_format",
+        "text_variation",
+        "text_spacing",
+        "text_utf16",
+        "class_utf16",
+        "href",
+        "omitted_false",
+        "link_conflict",
+    ],
+)
+def test_complete_host_node_shape_is_required(modules, dashboard, damage):
+    source, _ = modules
+    if damage.startswith("missing_"):
+        key = "parent" if damage == "missing_root_parent" else damage.removeprefix("missing_")
+        del dashboard["capture"]["nodes"][0][key]
+    else:
+        node = {"tag": "A", "parent": 0, "classes": "", "text": "Unrelated link"}
+        if damage == "extra":
+            node["extra_metadata"] = "not emitted by provider"
+        elif damage == "tag":
+            node["tag"] = "bad:tag"
+        elif damage == "text_format":
+            node["text"] = "visible\u200btext"
+        elif damage == "text_variation":
+            node["text"] = "visible\ufe0f"
+        elif damage == "text_spacing":
+            node["text"] = " unnormalized "
+        elif damage == "text_utf16":
+            node["text"] = "😀" * 8001
+        elif damage == "class_utf16":
+            node["classes"] = "😀" * 501
+        elif damage == "href":
+            node["href"] = "https://other.invalid/private?token=NOT-EXPORTED"
+        elif damage == "omitted_false":
+            node["link_omitted"] = False
+        else:
+            node["href"] = "https://sessionize.com/app/speaker/event/details/424242"
+            node["link_omitted"] = True
+        dashboard["capture"]["nodes"].append(node)
+    with pytest.raises(source.SourceError):
+        source.prepare(dashboard)
+
+
+def test_host_svg_shape_and_omitted_link_metadata_remain_supported(modules, dashboard):
+    source, _ = modules
+    nodes = dashboard["capture"]["nodes"]
+    nodes.extend(
+        [
+            {"tag": "svg", "parent": 0, "classes": "icon", "text": ""},
+            {"tag": "path", "parent": len(nodes), "classes": "", "text": ""},
+            {"tag": "A", "parent": 0, "classes": "", "text": "Other", "link_omitted": True},
+        ]
+    )
+    observations, _ = source.prepare(dashboard)
+    assert len(observations) == 51
+
+
+def test_cli_first_import_initializes_one_private_ledger(
+    modules, dashboard, tmp_path, monkeypatch, capsys
+):
+    _, owner = modules
+    path = tmp_path / "ledger"
+    monkeypatch.setattr(owner, "LEDGER", path)
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(dashboard)))
+    assert not path.exists() and owner.main(["import"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["observations"] == 51 and len(owner.read(path)["rows"]) == 51
+    assert path.stat().st_mode & 0o777 == 0o600
+
+
+def test_native_utf16_title_limit_is_not_a_python_codepoint_limit(modules, dashboard):
+    source, _ = modules
+    dashboard["capture"]["title"] = "😀" * 151
+    with pytest.raises(source.SourceError):
+        source.prepare(dashboard)
+
+
+def test_native_node_count_bound_is_preserved(modules, dashboard):
+    source, _ = modules
+    nodes = dashboard["capture"]["nodes"]
+    nodes.extend(
+        {"tag": "SPAN", "parent": 0, "classes": "", "text": ""} for _ in range(12001 - len(nodes))
+    )
+    with pytest.raises(source.SourceError, match="capture_bounds"):
+        source.prepare(dashboard)
+
+
+def test_supported_assigned_unicode_and_native_exact_utf16_bound(modules, dashboard):
+    source, _ = modules
+    dashboard["capture"]["title"] = "😀" * 150
+    dashboard["capture"]["nodes"].append(
+        {"tag": "SPAN", "parent": 0, "classes": "", "text": "😀" * 8000}
+    )
+    observations, _ = source.prepare(dashboard)
+    assert len(observations) == 51
+
+
+def hydrated_mail(*, partial=False, missing=False):
+    """Synthetic actual-format wrapper; no provider or retained mail is read."""
+    message = {
+        "messageId": "a001",
+        "from": "source@example.invalid",
+        "to": "owner@example.invalid",
+        "subject": "Your proposal: Example Talk",
+        "internalDate": "2020-11-01T00:00:00Z",
+        "labelIds": [],
+        "body": "Incomplete prefix",
+        "body_complete": False,
+    }
+    full = {
+        "schema_version": 1,
+        "message_id": "a001",
+        "thread_id": "b001",
+        "subject": message["subject"],
+        "from": message["from"],
+        "body": (
+            'We have received your proposal "Example Talk" to Example Event. We will notify you'
+        ),
+        "body_complete": not partial,
+        "citation_url": "https://mail.google.com/mail/u/0/#all/b001",
+        "source_trust": "untrusted",
+    }
+    wrapper = {
+        "schema_version": 1,
+        "search": {
+            "schema_version": 1,
+            "threads": [
+                {
+                    "thread_id": "b001",
+                    "messages": [message],
+                    "messages_omitted": 0,
+                    "complete": False,
+                }
+            ],
+            "next_page_token": None,
+            "threads_omitted": 0,
+            "complete": False,
+            "errors": [],
+        },
+        "body_reads": []
+        if missing
+        else [
+            {
+                "message_id": "a001",
+                "thread_id": "b001",
+                "internalDate": message["internalDate"],
+                "evidence": full,
+            }
+        ],
+        "body_reads_omitted": int(missing),
+        "complete": False,
+        "errors": (
+            [{"message_id": "a001", "kind": "body_unavailable"}]
+            if missing
+            else [{"message_id": "a001", "kind": "body_incomplete"}]
+            if partial
+            else []
+        ),
+    }
+    return {
+        "schema_version": 2,
+        "source": "mail",
+        "collections": [
+            {
+                "family": "sessionize-submission",
+                "scope": "synthetic bounded query",
+                "observed_at": "2020-12-01T00:00:00Z",
+                "evidence": wrapper,
+            }
+        ],
+    }
+
+
+def test_hydrated_positive_keeps_original_search_and_all_gaps(modules, tmp_path):
+    source, owner = modules
+    packet = hydrated_mail()
+    wrapper = packet["collections"][0]["evidence"]
+    wrapper["search"]["next_page_token"] = "PRIVATE-CONTINUATION"
+    wrapper["search"]["threads_omitted"] = 2
+    wrapper["search"]["errors"] = [{"kind": "thread_unavailable"}]
+    wrapper["search"]["threads"][0]["messages_omitted"] = 1
+    before = deepcopy(packet)
+    observations, scopes = source.prepare(packet)
+    assert packet == before
+    assert observations[0]["fact"]["status"] == "submitted"
+    assert observations[0]["fact"]["complete"] is True
+    assert observations[0]["fact"]["source_at"] == "2020-11-01T00:00:00Z"
+    assert not scopes[0]["complete"]
+    assert "search incomplete, paginated, omitted or failed" in scopes[0]["gaps"]
+    assert "thread incomplete or messages omitted" in scopes[0]["gaps"]
+    assert "message body incomplete" in scopes[0]["gaps"]
+    path = tmp_path / "ledger"
+    owner.record_many(path, observations, scopes)
+    assert "PRIVATE-CONTINUATION" not in path.read_text()
+    assert not owner.record_many(path, *source.prepare(packet))["changed"]
+
+
+@pytest.mark.parametrize("partial,missing", [(True, False), (False, True)])
+def test_failed_or_partial_hydration_never_becomes_positive(modules, partial, missing):
+    source, _ = modules
+    observations, scopes = source.prepare(hydrated_mail(partial=partial, missing=missing))
+    assert observations[0]["fact"]["complete"] is False
+    assert not scopes[0]["complete"]
+
+
+def test_source2_complete_search_without_hydration_and_legacy_source1(modules, mail):
+    source, _ = modules
+    before = deepcopy(mail)
+    old = source.prepare(mail)
+    packet = hydrated_mail()
+    wrapper = packet["collections"][0]["evidence"]
+    full = wrapper["body_reads"][0]["evidence"]
+    message = wrapper["search"]["threads"][0]["messages"][0]
+    message.update(body=full["body"], body_complete=True)
+    wrapper["search"]["complete"] = wrapper["search"]["threads"][0]["complete"] = True
+    wrapper.update(body_reads=[], complete=True)
+    observations, scopes = source.prepare(packet)
+    assert observations[0]["fact"]["complete"] is True
+    assert scopes[0]["gaps"] == [
+        "proposal identity unverified; explicit owner/native binding required"
+    ]
+    assert source.prepare(mail) == old and mail == before
+
+
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "outer_version",
+        "source_kind",
+        "wrapper_version",
+        "wrapper_extra",
+        "search_version",
+        "search_extra",
+        "read_extra",
+        "id",
+        "thread",
+        "date",
+        "duplicate_read",
+        "complete_read",
+        "future_fetch",
+        "fetch_id",
+        "fetch_thread",
+        "citation",
+        "trust",
+        "body_bool",
+        "body_bytes",
+        "omitted",
+        "missing_read",
+        "missing_error",
+        "extra_error",
+        "duplicate_error",
+        "unknown_error",
+        "error_kind",
+        "error_on_complete",
+        "false_complete",
+        "search_false_complete",
+        "duplicate_message",
+        "foreign_error",
+        "wrapper_bytes",
+        "search_bytes",
+        "message_cap",
+    ],
+)
+def test_source2_malformed_binding_or_coverage_holds_whole_import(modules, tmp_path, damage):
+    source, owner = modules
+    packet = hydrated_mail()
+    wrapper = packet["collections"][0]["evidence"]
+    search = wrapper["search"]
+    thread = search["threads"][0]
+    read = wrapper["body_reads"][0]
+    if damage == "outer_version":
+        packet["schema_version"] = 3
+    elif damage == "source_kind":
+        packet["source"] = "sessionize"
+    elif damage == "wrapper_version":
+        wrapper["schema_version"] = True
+    elif damage == "wrapper_extra":
+        wrapper["guess"] = True
+    elif damage == "search_version":
+        search["schema_version"] = 2
+    elif damage == "search_extra":
+        search["guessed"] = True
+    elif damage == "read_extra":
+        read["role"] = "main"
+    elif damage == "id":
+        read["message_id"] = "a002"
+    elif damage == "thread":
+        read["thread_id"] = "b002"
+    elif damage == "date":
+        read["internalDate"] = "2020-11-02T00:00:00Z"
+    elif damage == "duplicate_read":
+        wrapper["body_reads"].append(deepcopy(read))
+    elif damage == "complete_read":
+        thread["messages"][0]["body_complete"] = True
+    elif damage == "future_fetch":
+        read["evidence"]["schema_version"] = 2
+    elif damage == "fetch_id":
+        read["evidence"]["message_id"] = "a002"
+    elif damage == "fetch_thread":
+        read["evidence"]["thread_id"] = "b002"
+    elif damage == "citation":
+        read["evidence"]["citation_url"] += "?secret=PRIVATE"
+    elif damage == "trust":
+        read["evidence"]["source_trust"] = "owner"
+    elif damage == "body_bool":
+        read["evidence"]["body_complete"] = 1
+    elif damage == "body_bytes":
+        read["evidence"]["body"] = "é" * (128 * 1024 + 1)
+    elif damage == "omitted":
+        wrapper["body_reads_omitted"] = True
+    elif damage == "missing_read":
+        wrapper["body_reads"] = []
+    elif damage == "missing_error":
+        wrapper["body_reads"] = []
+        wrapper["body_reads_omitted"] = 1
+    elif damage in {"extra_error", "error_on_complete"}:
+        wrapper["errors"] = [{"message_id": "a001", "kind": "body_unavailable"}]
+    elif damage == "duplicate_error":
+        wrapper["body_reads"] = []
+        wrapper["body_reads_omitted"] = 1
+        wrapper["errors"] = [{"message_id": "a001", "kind": "body_unavailable"}] * 2
+    elif damage == "unknown_error":
+        wrapper["body_reads"] = []
+        wrapper["body_reads_omitted"] = 1
+        wrapper["errors"] = [{"message_id": "a001", "kind": "guessed"}]
+    elif damage == "error_kind":
+        read["evidence"]["body_complete"] = False
+        wrapper["errors"] = [{"message_id": "a001", "kind": "binding_changed"}]
+    elif damage == "false_complete":
+        wrapper["complete"] = True
+    elif damage == "search_false_complete":
+        search["complete"] = True
+    elif damage == "duplicate_message":
+        thread["messages"].append(deepcopy(thread["messages"][0]))
+    elif damage == "foreign_error":
+        wrapper["errors"] = [{"message_id": "a002", "kind": "body_unavailable"}]
+    elif damage == "wrapper_bytes":
+        wrapper["errors"] = ["x" * (512 * 1024)]
+    elif damage == "search_bytes":
+        search["errors"] = [{"kind": "x" * (64 * 1024)}]
+    else:
+        thread["messages"] = [{**thread["messages"][0], "messageId": f"{i:x}"} for i in range(51)]
+    # Valid earlier collection cannot commit when a later wrapper is malformed.
+    packet["collections"].insert(0, deepcopy(hydrated_mail()["collections"][0]))
+    path = tmp_path / "ledger"
+    with pytest.raises(source.SourceError):
+        owner.record_many(path, *source.prepare(packet))
+    assert not path.exists()
+
+
+@pytest.mark.parametrize(
+    "kind", ["binding_changed", "body_unavailable", "body_too_large", "aggregate_limit"]
+)
+def test_source2_known_omission_categories_remain_unknown(modules, kind):
+    source, _ = modules
+    packet = hydrated_mail(missing=True)
+    packet["collections"][0]["evidence"]["errors"][0]["kind"] = kind
+    observations, scopes = source.prepare(packet)
+    assert not observations[0]["fact"]["complete"] and not scopes[0]["complete"]
+
+
+def test_source2_exact_utf8_body_bound_retains_whole_body(modules):
+    source, _ = modules
+    packet = hydrated_mail()
+    body = packet["collections"][0]["evidence"]["body_reads"][0]["evidence"]
+    body["body"] = "é" * (128 * 1024)
+    observations, scopes = source.prepare(packet)
+    assert observations[0]["fact"]["complete"] is True
+    assert observations[0]["fact"]["status"] is None
+    assert not scopes[0]["complete"]
+
+
+def test_source2_actual_import_and_late_bad_wrapper_preserve_ledger(
+    modules, tmp_path, monkeypatch, capsys
+):
+    _, owner = modules
+    path = tmp_path / "cfp-submissions.json"
+    monkeypatch.setattr(owner, "LEDGER", path)
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(hydrated_mail())))
+    assert owner.main(["import"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["changed"]
+    before = path.read_bytes()
+    packet = hydrated_mail()
+    packet["collections"].append(deepcopy(packet["collections"][0]))
+    packet["collections"][-1]["evidence"]["body_reads"][0]["internalDate"] = "2020-11-02"
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(packet)))
+    assert owner.main(["import"]) == 1
+    captured = capsys.readouterr()
+    assert "mail_body_binding" in captured.err
+    assert path.read_bytes() == before
+    assert path.stat().st_mode & 0o777 == 0o600

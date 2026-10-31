@@ -2,11 +2,12 @@
 
 These adapters make no network calls and authenticate no caller or source.
 Sessionize input is the rendered-node capture documented beside the skill.
-Mail input is the unchanged Admin search-mail schema1 envelope with complete
-body reads and their bound message dates. Unknown templates remain unresolved.
+Mail source1 retains Admin search-mail schema1 unchanged. Mail source2 accepts
+the versioned Admin mail-evidence wrapper and joins bound full-body reads without
+repairing search coverage. Unknown templates remain unresolved.
 
 Callable contract: prepare(request) accepts one decoded source1 dict with source
-sessionize or mail, as defined in references/source-input.md. It returns the
+sessionize or mail, or a mail source2 dict, as defined in references/source-input.md. It returns the
 tuple (observations, scopes): fresh lists of identity/fact observations for the
 ledger owner and coverage1 records describing checked scopes and retained gaps.
 Unknown templates or missing identities remain unresolved observations; they do
@@ -21,14 +22,33 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import unicodedata
 from datetime import date, datetime
 from html.parser import HTMLParser
 from urllib.parse import urlsplit
 
-MAX_NODES = 20000
+MAX_NODES = 12000
 MAX_MESSAGES = 1000
 MAX_BODY = 256 * 1024
+MAX_CLAIM_TEXT = 300
+# Published Admin wrapper1 and unchanged search1/fetch1 bounds.
+MAX_MAIL_WRAPPER_BYTES = 512 * 1024
+MAX_MAIL_SEARCH_BYTES = 64 * 1024
+MAX_MAIL_READS = 50
+MAIL_READ_ERRORS = {
+    "binding_changed",
+    "body_unavailable",
+    "body_incomplete",
+    "body_too_large",
+    "aggregate_limit",
+}
 MAIL_ID = re.compile(r"[A-Fa-f0-9]{1,128}")
+# Non-Cc/Cf default-ignorable ranges from Unicode DerivedCoreProperties.
+# Unknown/unassigned characters are unsupported rather than guessed visible.
+DEFAULT_IGNORABLE_TEXT = re.compile(
+    r"[\u034f\u115f-\u1160\u17b4-\u17b5\u180b-\u180d\u180f"
+    r"\u3164\ufe00-\ufe0f\uffa0\U000e0100-\U000e01ef]"
+)
 STATUS = {
     ("session-status_0", "Accepted"): "accepted",
     ("session-status_2", "Waitlisted"): "waitlisted",
@@ -72,6 +92,50 @@ def bounded(value, size=2000) -> str:
         raise SourceError("source_text; supply the documented bounded source text")
     require(not any(ord(c) < 32 and c not in "\n\r\t" for c in value), "source_text")
     return value
+
+
+def native_string(value, maximum):
+    require(isinstance(value, str), "capture_node")
+    try:
+        units = len(value.encode("utf-16-le")) // 2
+    except UnicodeEncodeError as error:
+        raise SourceError("capture_encoding; retain unsupported native text") from error
+    require(units <= maximum, "capture_node_bounds")
+    return value
+
+
+def capture_node(node):
+    required = {"tag", "parent", "classes", "text"}
+    require(
+        isinstance(node, dict) and required <= set(node) <= required | {"href", "link_omitted"},
+        "capture_node_shape",
+    )
+    tag = native_string(node["tag"], 20)
+    require(re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{0,19}", tag), "capture_node_tag")
+    native_string(node["classes"], 1000)
+    value = native_string(node["text"], 16000)
+    require(
+        value == " ".join(value.split())
+        and not DEFAULT_IGNORABLE_TEXT.search(value)
+        and not any(unicodedata.category(c) in {"Cc", "Cf", "Cs", "Cn"} for c in value),
+        "capture_node_text",
+    )
+    if "href" in node:
+        require(
+            isinstance(node["href"], str)
+            and re.fullmatch(
+                r"https://sessionize\.com/app/speaker/"
+                r"(?:event/details/[0-9]+|session/[A-Za-z0-9_-]{1,100})",
+                node["href"],
+            ),
+            "capture_node_link",
+        )
+    require(
+        ("link_omitted" not in node or node["link_omitted"] is True)
+        and not ("href" in node and "link_omitted" in node)
+        and (not ({"href", "link_omitted"} & set(node)) or tag.upper() == "A"),
+        "capture_node_link",
+    )
 
 
 def list_value(value, code) -> list:
@@ -268,7 +332,7 @@ def sessionize(request):
         "capture_shape",
     )
     require(
-        bounded(capture["title"], 300).strip() and bounded(capture["scope"]).strip(),
+        native_string(capture["title"], 300).strip() and bounded(capture["scope"]).strip(),
         "capture_provenance",
     )
     require(
@@ -286,10 +350,7 @@ def sessionize(request):
     require(1 <= len(nodes) <= MAX_NODES, "capture_bounds")
     children = [[] for _ in nodes]
     for i, node in enumerate(nodes):
-        require(isinstance(node, dict), "capture_node")
-        bounded(node.get("text"), MAX_BODY)
-        bounded(node.get("classes"), 1000)
-        bounded(node.get("tag"), 20)
+        capture_node(node)
         parent = node.get("parent")
         require(
             (i == 0 and parent is None) or (type(parent) is int and 0 <= parent < i), "capture_tree"
@@ -463,39 +524,67 @@ def mail_text(body):
     return " ".join(re.sub(r"https?://\S+", " ", " ".join(parser.parts)).split())
 
 
+def template_pair(body, patterns, suffix):
+    """Fixed-count delimiter reads; unrecognized/oversized fields remain unknown."""
+    for prefix, separator in patterns:
+        start = body.find(prefix)
+        if start < 0:
+            continue
+        start += len(prefix)
+        split = body.find(separator, start)
+        if split < 0 or not 0 < split - start <= MAX_CLAIM_TEXT:
+            continue
+        second = split + len(separator)
+        end = body.find(suffix, second)
+        if end < 0 or not 0 < end - second <= MAX_CLAIM_TEXT:
+            continue
+        return body[start:split], body[second:end]
+    return None
+
+
 def mail_fields(family, subject, body):
     """Only actual observed structural templates establish positive claims."""
     result = {}
     # Query families describe coverage, not which claim a fixed template means.
     if subject.startswith("Your proposal: "):
-        match = re.search(
-            r"We have received your proposal [“\"](.+?)[”\"] to (.+?)\. We will notify you", body
+        match = template_pair(
+            body,
+            [
+                ("We have received your proposal “", "” to "),
+                ('We have received your proposal "', '" to '),
+            ],
+            ". We will notify you",
         )
-        if match and subject.removeprefix("Your proposal: ") == match[1]:
-            result.update(talk_title=match[1], event_name=match[2], status="submitted")
+        if match and subject.removeprefix("Your proposal: ") == match[0]:
+            result.update(talk_title=match[0], event_name=match[1], status="submitted")
     elif " We received your proposal: " in subject:
-        match = re.search(
-            r'Thank you for submitting "(.+?)" to (.+?)\. You can view, edit, or withdraw', body
+        match = template_pair(
+            body,
+            [('Thank you for submitting "', '" to ')],
+            ". You can view, edit, or withdraw",
         )
-        if match and subject == f"{match[2]} We received your proposal: {match[1]}":
+        if match and subject == f"{match[1]} We received your proposal: {match[0]}":
             result.update(
-                talk_title=match[1],
-                event_name=match[2],
+                talk_title=match[0],
+                event_name=match[1],
                 status="submitted",
-                dates=own_form_claim(match[2]),
+                dates=own_form_claim(match[1]),
             )
     elif "Thank you for submitting your proposal" in subject:
-        match = re.search(
-            r"Thank you for submitting your proposal to speak at (.+?) ,?\s*from (.+?)\. "
-            r"We will review completed proposals",
+        match = template_pair(
             body,
+            [
+                ("Thank you for submitting your proposal to speak at ", " , from "),
+                ("Thank you for submitting your proposal to speak at ", " from "),
+            ],
+            ". We will review completed proposals",
         )
         if (
             match
             and "Thank you for submitting your proposal" in subject
             and "Oxford Abstracts" in body
         ):
-            result.update(event_name=match[1], status="submitted", **oxford_claim(match[2]))
+            result.update(event_name=match[0], status="submitted", **oxford_claim(match[1]))
     elif subject.startswith("Your sessions at "):
         if (
             "following sessions have not been accepted for " in body
@@ -508,30 +597,187 @@ def mail_fields(family, subject, body):
             r"\[[A-Za-z0-9_-]+\] Your proposal has been accepted : (.+)", subject
         )
         backup = re.fullmatch(r"\[[A-Za-z0-9_-]+\] Your proposal (.+) is marked as backup", subject)
-        proposal = re.search(
-            r'Thank you for submitting your proposal "(.+?)" (?:for|to) (.+?)\.', body
+        proposal = template_pair(
+            body,
+            [
+                ('Thank you for submitting your proposal "', '" for '),
+                ('Thank you for submitting your proposal "', '" to '),
+            ],
+            ".",
         )
-        decision = re.search(r'proposal, "(.+?)", has been accepted for (.+?)!', body)
+        decision = template_pair(body, [('proposal, "', '", has been accepted for ')], "!")
         if (
             refused
             and proposal
-            and refused[1] == proposal[1]
+            and refused[1] == proposal[0]
             and "your talk was not selected" in body
         ):
-            result.update(talk_title=proposal[1], event_name=proposal[2], status="declined")
-        elif accepted and decision and accepted[1] == decision[1]:
-            result.update(talk_title=decision[1], event_name=decision[2], status="accepted")
+            result.update(talk_title=proposal[0], event_name=proposal[1], status="declined")
+        elif accepted and decision and accepted[1] == decision[0]:
+            result.update(talk_title=decision[0], event_name=decision[1], status="accepted")
         elif (
             backup
             and proposal
-            and backup[1] == proposal[1]
+            and backup[1] == proposal[0]
             and (
                 "Your proposal has been selected as a backup talk." in body
                 and "standby lineup should scheduling changes occur" in body
             )
         ):
-            result.update(talk_title=proposal[1], event_name=proposal[2], status="waitlisted")
+            result.update(talk_title=proposal[0], event_name=proposal[1], status="waitlisted")
     return result
+
+
+def mail_bytes(value):
+    try:
+        return len(
+            json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode()
+        )
+    except (ValueError, UnicodeEncodeError) as error:
+        raise SourceError("mail_encoding; retain the unsupported provider evidence") from error
+
+
+def mail_handoff(wrapper):
+    """Validate wrapper1 before any import; return unchanged search1 and bound reads.
+
+    Limits/error kinds above mirror the declared Admin mail-evidence owner.
+    No data is authenticated here. Successful hydration can support a positive
+    message fact; it never clears original search/thread/body coverage gaps.
+    """
+    require(
+        isinstance(wrapper, dict)
+        and set(wrapper)
+        == {"schema_version", "search", "body_reads", "body_reads_omitted", "complete", "errors"}
+        and type(wrapper["schema_version"]) is int
+        and wrapper["schema_version"] == 1,
+        "mail_handoff_version",
+    )
+    require(mail_bytes(wrapper) <= MAX_MAIL_WRAPPER_BYTES, "mail_handoff_bounds")
+    search = wrapper["search"]
+    require(
+        isinstance(search, dict)
+        and set(search)
+        == {"schema_version", "threads", "next_page_token", "threads_omitted", "complete", "errors"}
+        and type(search["schema_version"]) is int
+        and search["schema_version"] == 1,
+        "mail_search_version",
+    )
+    require(mail_bytes(search) <= MAX_MAIL_SEARCH_BYTES, "mail_search_bounds")
+    require(
+        type(search["complete"]) is bool
+        and isinstance(search["errors"], list)
+        and type(search["threads_omitted"]) is int
+        and search["threads_omitted"] >= 0
+        and (
+            search["next_page_token"] is None
+            or isinstance(search["next_page_token"], str)
+            and 0 < len(search["next_page_token"].encode()) <= 2000
+        ),
+        "mail_search_coverage",
+    )
+    threads = list_value(search["threads"], "mail_threads")
+    require(len(threads) <= MAX_MAIL_READS, "mail_threads")
+    originals, pending, thread_ids = {}, {}, set()
+    search_gap = bool(search["errors"] or search["threads_omitted"] or search["next_page_token"])
+    for thread in threads:
+        require(isinstance(thread, dict), "mail_thread_shape")
+        tid = bounded(thread.get("thread_id"), 128)
+        require(MAIL_ID.fullmatch(tid) and tid not in thread_ids, "mail_thread_identity")
+        thread_ids.add(tid)
+        require(
+            type(thread.get("complete")) is bool
+            and type(thread.get("messages_omitted")) is int
+            and thread["messages_omitted"] >= 0,
+            "mail_thread_coverage",
+        )
+        search_gap |= not thread["complete"] or bool(thread["messages_omitted"])
+        for message in list_value(thread.get("messages"), "mail_messages"):
+            require(isinstance(message, dict), "mail_message_shape")
+            mid = bounded(message.get("messageId"), 128)
+            require(MAIL_ID.fullmatch(mid) and mid not in originals, "mail_message_identity")
+            require(type(message.get("body_complete")) is bool, "mail_body_coverage")
+            bounded(message.get("body"), 6000)
+            originals[mid] = (tid, message)
+            require(len(originals) <= MAX_MAIL_READS, "mail_message_bounds")
+            search_gap |= not message["body_complete"] or message.get("internalDate") is None
+            if not message["body_complete"]:
+                pending[mid] = (tid, message)
+    require(not search["complete"] or not search_gap, "mail_search_coverage")
+    reads, errors = {}, {}
+    for read in list_value(wrapper["body_reads"], "mail_body_reads"):
+        require(
+            isinstance(read, dict)
+            and set(read) == {"message_id", "thread_id", "internalDate", "evidence"},
+            "mail_body_binding",
+        )
+        mid = bounded(read["message_id"], 128)
+        require(mid in pending and mid not in reads, "mail_body_binding")
+        tid, original = pending[mid]
+        require(
+            read["thread_id"] == tid
+            and read["internalDate"] == original.get("internalDate")
+            and isinstance(read["internalDate"], str)
+            and read["internalDate"],
+            "mail_body_binding",
+        )
+        full = read["evidence"]
+        require(
+            isinstance(full, dict)
+            and set(full)
+            == {
+                "schema_version",
+                "message_id",
+                "thread_id",
+                "subject",
+                "from",
+                "body",
+                "body_complete",
+                "citation_url",
+                "source_trust",
+            }
+            and type(full["schema_version"]) is int
+            and full["schema_version"] == 1
+            and full["message_id"] == mid
+            and full["thread_id"] == tid
+            and full["citation_url"] == f"https://mail.google.com/mail/u/0/#all/{tid}"
+            and full["source_trust"] == "untrusted"
+            and type(full["body_complete"]) is bool,
+            "mail_body_evidence",
+        )
+        bounded(full["subject"], 300)
+        bounded(full["from"], 300)
+        body = bounded(full["body"], MAX_BODY)
+        require(len(body.encode()) <= MAX_BODY, "mail_body_bounds")
+        reads[mid] = full
+    for error in list_value(wrapper["errors"], "mail_handoff_errors"):
+        require(
+            isinstance(error, dict) and set(error) == {"message_id", "kind"}, "mail_handoff_error"
+        )
+        mid = bounded(error["message_id"], 128)
+        require(
+            mid in pending
+            and mid not in errors
+            and isinstance(error["kind"], str)
+            and error["kind"] in MAIL_READ_ERRORS,
+            "mail_handoff_error",
+        )
+        errors[mid] = error["kind"]
+    omitted = set(pending) - set(reads)
+    partial = {mid for mid, full in reads.items() if not full["body_complete"]}
+    require(
+        set(errors) == omitted | partial
+        and all(errors[mid] == "body_incomplete" for mid in partial)
+        and all(errors[mid] != "body_incomplete" for mid in omitted),
+        "mail_handoff_coverage",
+    )
+    require(
+        type(wrapper["body_reads_omitted"]) is int
+        and wrapper["body_reads_omitted"] == len(omitted)
+        and type(wrapper["complete"]) is bool
+        and wrapper["complete"] == (search["complete"] and not omitted and not errors),
+        "mail_handoff_coverage",
+    )
+    return search, reads
 
 
 def mail(request):
@@ -551,6 +797,9 @@ def mail(request):
         observed_at = bounded(capture["observed_at"], 40)
         clock = observation_clock(observed_at)
         evidence = capture["evidence"]
+        body_reads = {}
+        if request["schema_version"] == 2:
+            evidence, body_reads = mail_handoff(evidence)
         require(
             isinstance(evidence, dict)
             and type(evidence.get("schema_version")) is int
@@ -590,7 +839,13 @@ def mail(request):
                 source_at = bounded(message.get("internalDate"), 40)
                 require(type(message.get("body_complete")) is bool, "mail_body_coverage")
                 raw_body = bounded(message.get("body"), MAX_BODY)
-                fingerprint = sha([subject, source_at, raw_body, message["body_complete"]])
+                body_complete = message["body_complete"]
+                if not body_complete:
+                    gaps.append("message body incomplete")
+                if identifier in body_reads:
+                    full = body_reads[identifier]
+                    raw_body, body_complete = full["body"], full["body_complete"]
+                fingerprint = sha([subject, source_at, raw_body, body_complete])
                 fields = mail_fields(family, subject, mail_text(raw_body))
                 if not fields:
                     gaps.append("source template unsupported; no status inferred")
@@ -605,7 +860,7 @@ def mail(request):
                         "clock": clock,
                         "observed_at": observed_at,
                         "source_at": source_at,
-                        "complete": message["body_complete"],
+                        "complete": body_complete,
                     }
                 else:
                     require(prior["fingerprint"] == fingerprint, "mail_identity_conflict")
@@ -637,7 +892,11 @@ def prepare(request):
     require(
         isinstance(request, dict)
         and type(request.get("schema_version")) is int
-        and request["schema_version"] == 1,
+        and (
+            request["schema_version"] == 1
+            or request["schema_version"] == 2
+            and request.get("source") == "mail"
+        ),
         "source_input_version",
     )
     if request.get("source") == "sessionize":
