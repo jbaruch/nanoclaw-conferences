@@ -33,8 +33,11 @@ owner. Unknown templates/identities remain unresolved; future/malformed state,
 unsafe files, conflicts, unsupported captures and capacity failures HOLD.
 
 Exit 0 emits a result, including preserved reconciliation conflicts; exit 1
-holds retained state and names recovery. Unexpected implementation errors
-propagate. Only an absent ledger is initialized by record/manual/import or import-mail-artifacts.
+stops and names recovery. An unconfirmed guarded CFP attempt stops sync before
+any later owner call; earlier writes may already exist and are never rolled back.
+Inspect actual CFP state before retrying. Unexpected implementation errors
+propagate. Only an absent ledger is initialized by record/manual/import or
+import-mail-artifacts.
 query/history/bind/reconcile/sync never initialize it. The scripts send
 nothing, create no provider objects and never advance heartbeat/cadence state.
 """
@@ -79,7 +82,11 @@ CFP_STATUSES = {"open", "approved", "dismissed", "conflict", "sent", "remind", "
 
 
 class Hold(ValueError):
-    """Supported, actionable no-effect refusal."""
+    """Supported, actionable refusal."""
+
+
+class CfpCommitUnconfirmed(Hold):
+    """A guarded write was attempted; inspect actual state before any later attempt."""
 
 
 def obj(value, keys):
@@ -849,18 +856,25 @@ def reconcile(path, cfp_path, request, expected_ledger_sha256=None):
         # No ledger lock is held across the existing CFP owner's lock.
         if read(path) != store:
             raise Hold("ledger_changed; re-read its exact current evidence before reconciliation")
-        response = owner_call(
-            owner,
-            [
-                "--state",
-                str(cfp_path),
-                "--expected-digests",
-                str(expected),
-                "--unique-cfp-url",
-                url(item["fields"]["cfp_url"]),
-            ],
-            {request["slug"]: proposed},
-        )
+        try:
+            response = owner_call(
+                owner,
+                [
+                    "--state",
+                    str(cfp_path),
+                    "--expected-digests",
+                    str(expected),
+                    "--unique-cfp-url",
+                    url(item["fields"]["cfp_url"]),
+                ],
+                {request["slug"]: proposed},
+            )
+        except Hold as error:
+            raise CfpCommitUnconfirmed(
+                f"cfp_commit_unconfirmed; {error} "
+                "Inspect actual CFP state before another owner attempt; do not replay."
+            ) from error
+
     expected_keys = {"written", "skipped_user_actioned", "total_records", "skipped_changed"}
     if (
         set(response) != expected_keys
@@ -877,7 +891,10 @@ def reconcile(path, cfp_path, request, expected_ledger_sha256=None):
         )
         not in ((1, 0, []), (0, 1, []), (0, 0, [request["slug"]]))
     ):
-        raise Hold("cfp_owner_result; inspect the existing owner result; do not replay blindly")
+        raise CfpCommitUnconfirmed(
+            "cfp_commit_unconfirmed; cfp_owner_result; inspect actual CFP state "
+            "before another owner attempt; do not replay blindly"
+        )
     outcome = "sent" if response["written"] == 1 else "conflict"
     return {
         "schema_version": 1,
@@ -989,6 +1006,8 @@ def sync(path, cfp_path):
                 {"identity": row["identity"], "slug": slugs[0]},
                 expected_ledger_sha256=checked_hash,
             )
+        except CfpCommitUnconfirmed:
+            raise
         except Hold as error:
             outcome = {"outcome": "hold", "recovery": str(error)}
         if len(result_text(outcome).encode()) > MAX_SYNC_OUTCOME:

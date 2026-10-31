@@ -1104,3 +1104,72 @@ def test_single_slug_record_count_matches_the_retained_outcome(
         with pytest.raises(ledger.Hold, match="cfp_owner_result"):
             ledger.reconcile(path, cfp_path, request)
     assert cfp_path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "failure", ["nonzero", "malformed", "duplicate", "invalid_result", "snapshot_nonzero"]
+)
+def test_sync_stops_uncertain_writes_but_isolates_proven_readonly_failure(
+    ledger, observation, cfp, tmp_path, monkeypatch, capsys, failure
+):
+    path, cfp_path = tmp_path / "ledger", tmp_path / "cfp"
+    ledger.record(path, observation)
+    second = deepcopy(observation)
+    second["identity"]["event"]["id"] = "event-18"
+    second["fact"].update(evidence_id="second-source", cfp_url="https://example.invalid/second")
+    ledger.record(path, second)
+    write(cfp_path, {"first": cfp, "second": {**cfp, "cfp_url": second["fact"]["cfp_url"]}})
+    before = path.read_bytes()
+    original_run = ledger.subprocess.run
+    commits, snapshots = [], []
+
+    def owner_process(arguments, **kwargs):
+        completed = original_run(arguments, **kwargs)
+        if "--snapshot" in arguments:
+            snapshots.append(arguments)
+            if failure == "snapshot_nonzero" and len(snapshots) == 1:
+                completed.returncode = 1
+                completed.stderr = "commit-state: cannot fingerprint source snapshot: synthetic"
+            return completed
+        assert completed.returncode == 0
+        commits.append(arguments)
+        if failure == "snapshot_nonzero":
+            return completed
+        # The maintained owner really wrote before its transport/result fails.
+        if failure == "nonzero":
+            completed.returncode = 1
+            completed.stderr = "commit-state: cannot write SYNTHETIC: OSError: uncertain close"
+        elif failure == "malformed":
+            completed.stdout = "not-json"
+        elif failure == "duplicate":
+            completed.stdout = '{"written":1,"written":0}'
+        else:
+            completed.stdout = json.dumps(
+                {
+                    "written": 1,
+                    "skipped_user_actioned": 1,
+                    "total_records": 2,
+                    "skipped_changed": [],
+                }
+            )
+        return completed
+
+    monkeypatch.setattr(ledger.subprocess, "run", owner_process)
+    monkeypatch.setattr(ledger, "LEDGER", path)
+    monkeypatch.setattr(ledger, "CFP_STATE", cfp_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO("{}"))
+    assert ledger.main(["sync"]) == (0 if failure == "snapshot_nonzero" else 1)
+    output = capsys.readouterr()
+    if failure == "snapshot_nonzero":
+        assert not output.err
+        result = json.loads(output.out)
+        assert sorted(item["outcome"] for item in result["results"]) == ["hold", "sent"]
+        assert not result["complete"]
+    else:
+        assert not output.out and "cfp_commit_unconfirmed" in output.err
+    assert len(commits) == 1
+    assert sorted(item["status"] for item in json.loads(cfp_path.read_text()).values()) == [
+        cfp["status"],
+        "sent",
+    ]
+    assert path.read_bytes() == before

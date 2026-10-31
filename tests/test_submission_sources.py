@@ -1348,3 +1348,10 @@ def test_oversized_rendered_count_has_actionable_atomic_cli_refusal(
     output = capsys.readouterr()
     assert not output.out and "capture_count" in output.err and "Traceback" not in output.err
     assert not ledger_path.exists()
+
+
+def test_sessionize_refuses_a_non_body_native_root(modules, dashboard):
+    source, _ = modules
+    dashboard["capture"]["nodes"][0]["tag"] = "DIV"
+    with pytest.raises(source.SourceError, match="capture_tree"):
+        source.prepare(dashboard)

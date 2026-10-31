@@ -364,7 +364,9 @@ def sessionize(request):
         capture_node(node)
         parent = node.get("parent")
         require(
-            (i == 0 and parent is None) or (type(parent) is int and 0 <= parent < i), "capture_tree"
+            (i == 0 and parent is None and node["tag"] == "BODY")
+            or (type(parent) is int and 0 <= parent < i),
+            "capture_tree",
         )
         if parent is not None:
             children[parent].append(i)
