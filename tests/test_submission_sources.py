@@ -193,11 +193,15 @@ def test_incomplete_body_cannot_assert_submission_and_changed_duplicate_holds(mo
     source, _ = modules
     message = mail["collections"][2]["evidence"]["threads"][0]["messages"][0]
     message["body_complete"] = False
+    mail["collections"][2]["evidence"]["complete"] = False
+    mail["collections"][2]["evidence"]["threads"][0]["complete"] = False
     # The same message appears in the DevOpsDays search: contradictory input must refuse.
     with pytest.raises(source.SourceError, match="mail_identity_conflict"):
         source.prepare(mail)
     duplicate = mail["collections"][5]["evidence"]["threads"][0]["messages"][0]
     duplicate["body_complete"] = False
+    mail["collections"][5]["evidence"]["complete"] = False
+    mail["collections"][5]["evidence"]["threads"][0]["complete"] = False
     observations, scopes = source.prepare(mail)
     receipt = next(v for v in observations if v["fact"]["citation"]["id"] == "a004")
     assert not receipt["fact"]["complete"]
@@ -500,6 +504,7 @@ def test_maintained_mail_id_bounds_and_long_id_recapture(modules, mail, tmp_path
         threads=collection["evidence"]["threads"][:1], complete=False, threads_omitted=2
     )
     collection["evidence"]["threads"][0]["messages"][0]["messageId"] = identifier
+    collection["evidence"]["threads"][0]["thread_latest_message_id"] = identifier
     packet = {"schema_version": 1, "source": "mail", "collections": [collection]}
     observations, scopes = source.prepare(packet)
     assert observations[0]["fact"]["citation"]["id"] == identifier
@@ -732,6 +737,12 @@ def hydrated_mail(*, partial=False, missing=False):
             "threads": [
                 {
                     "thread_id": "b001",
+                    "citation_url": "https://mail.google.com/mail/u/0/#all/b001",
+                    "source_trust": "untrusted",
+                    "message_count": 1,
+                    "thread_latest_message_id": message["messageId"],
+                    "thread_latest_message_date": message["internalDate"],
+                    "thread_latest_message_from": "them",
                     "messages": [message],
                     "messages_omitted": 0,
                     "complete": False,
@@ -782,8 +793,9 @@ def test_hydrated_positive_keeps_original_search_and_all_gaps(modules, tmp_path)
     wrapper = packet["collections"][0]["evidence"]
     wrapper["search"]["next_page_token"] = "PRIVATE-CONTINUATION"
     wrapper["search"]["threads_omitted"] = 2
-    wrapper["search"]["errors"] = [{"kind": "thread_unavailable"}]
+    wrapper["search"]["errors"] = [{"thread_id": "b002", "kind": "thread_unavailable"}]
     wrapper["search"]["threads"][0]["messages_omitted"] = 1
+    wrapper["search"]["threads"][0]["message_count"] = 2
     before = deepcopy(packet)
     observations, scopes = source.prepare(packet)
     assert packet == before
@@ -982,9 +994,13 @@ def test_source2_actual_import_and_late_bad_wrapper_preserve_ledger(
     path = tmp_path / "cfp-submissions.json"
     monkeypatch.setattr(owner, "LEDGER", path)
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(hydrated_mail())))
-    assert owner.main(["import"]) == 0
-    result = json.loads(capsys.readouterr().out)
-    assert result["changed"]
+    assert owner.main(["import"]) == 1
+    assert "source_transport" in capsys.readouterr().err
+    assert not path.exists()
+    # Public stdin cannot bypass the private transport; actual artifact import
+    # and late-malformed multi-receipt atomicity are covered by its owner tests.
+    source = modules[0]
+    owner.record_many(path, *source.prepare(hydrated_mail()))
     before = path.read_bytes()
     packet = hydrated_mail()
     packet["collections"].append(deepcopy(packet["collections"][0]))
@@ -992,6 +1008,160 @@ def test_source2_actual_import_and_late_bad_wrapper_preserve_ledger(
     monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(packet)))
     assert owner.main(["import"]) == 1
     captured = capsys.readouterr()
-    assert "mail_body_binding" in captured.err
+    assert "source_transport" in captured.err
     assert path.read_bytes() == before
     assert path.stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize(
+    "damage",
+    [
+        "thread_missing",
+        "thread_extra",
+        "citation",
+        "trust",
+        "count",
+        "count_bool",
+        "omitted",
+        "latest_id",
+        "latest_date",
+        "latest_direction",
+        "header_missing",
+        "header_extra",
+        "header_large",
+        "labels",
+        "label_item",
+        "error_missing_id",
+        "error_extra",
+        "error_kind",
+        "complete_body_gap",
+        "complete_thread_gap",
+    ],
+)
+def test_search1_nested_contract_validates_before_any_commit(
+    modules, tmp_path, source_version, damage
+):
+    source, owner = modules
+    packet = hydrated_mail()
+    search = packet["collections"][0]["evidence"]["search"]
+    thread = search["threads"][0]
+    message = thread["messages"][0]
+    if damage == "thread_missing":
+        del thread["citation_url"]
+    elif damage == "thread_extra":
+        thread["authority"] = True
+    elif damage == "citation":
+        thread["citation_url"] += "?PRIVATE-BEARER"
+    elif damage == "trust":
+        thread["source_trust"] = "trusted"
+    elif damage == "count":
+        thread["message_count"] = 2
+    elif damage == "count_bool":
+        thread["message_count"] = True
+    elif damage == "omitted":
+        thread["messages_omitted"] = -1
+    elif damage == "latest_id":
+        thread["thread_latest_message_id"] = "a002"
+    elif damage == "latest_date":
+        thread["thread_latest_message_date"] = "2020-10-01T00:00:00Z"
+    elif damage == "latest_direction":
+        thread["thread_latest_message_from"] = "me"
+    elif damage == "header_missing":
+        del message["from"]
+    elif damage == "header_extra":
+        message["threadId"] = "b001"
+    elif damage == "header_large":
+        message["subject"] = "X" * 301
+    elif damage == "labels":
+        message["labelIds"] = "SENT"
+    elif damage == "label_item":
+        message["labelIds"] = [1]
+    elif damage == "error_missing_id":
+        search["errors"] = [{"kind": "thread_unavailable"}]
+    elif damage == "error_extra":
+        search["errors"] = [{"kind": "invalid_thread_id", "raw": "PRIVATE"}]
+    elif damage == "error_kind":
+        search["errors"] = [{"kind": "future_error"}]
+    elif damage == "complete_body_gap":
+        thread["complete"] = True
+    else:
+        search["complete"] = True
+    packet["schema_version"] = source_version
+    if source_version == 1:
+        packet["collections"][0]["evidence"] = search
+    ledger_path = tmp_path / "ledger"
+    with pytest.raises(source.SourceError):
+        owner.record_many(ledger_path, *source.prepare(packet))
+    assert not ledger_path.exists()
+
+
+@pytest.mark.parametrize("suffix", ["Example\tEvent\r\n2020", "X" * 301])
+def test_declined_subject_claims_are_bounded_without_losing_status(modules, tmp_path, suffix):
+    source, owner = modules
+    fields = source.mail_fields(
+        "sessionize-sessions",
+        "Your sessions at " + suffix,
+        "The following sessions have not been accepted for Example Event",
+    )
+    assert fields["status"] == "declined"
+    assert fields["event_name"] == ("Example Event 2020" if len(suffix) < 301 else None)
+    fact = source.new_fact("mail", "bounded-decline", "2020-12-01T00:00:00Z", **fields)
+    fact["citation"] = {"kind": "mail", "id": "a001", "url": None}
+    assert owner.record_many(tmp_path / "ledger", [{"identity": None, "fact": fact}], [])["changed"]
+    # A bounded provider subject can contain whitespace controls; compose the
+    # complete search1 adapter and real ledger rather than testing only a field.
+    packet = hydrated_mail()
+    search = packet["collections"][0]["evidence"]["search"]
+    message = search["threads"][0]["messages"][0]
+    message.update(
+        subject="Your sessions at " + suffix,
+        body="The following sessions have not been accepted for Example Event",
+        body_complete=True,
+    )
+    search["complete"] = search["threads"][0]["complete"] = True
+    packet["schema_version"] = 1
+    packet["collections"][0]["evidence"] = search
+    target = tmp_path / "composed-ledger"
+    if len(message["subject"]) > 300:
+        with pytest.raises(source.SourceError):
+            owner.record_many(target, *source.prepare(packet))
+        assert not target.exists()
+    else:
+        observations, scopes = source.prepare(packet)
+        assert observations[0]["fact"]["event_name"] == "Example Event 2020"
+        assert owner.record_many(target, observations, scopes)["changed"]
+
+
+@pytest.mark.parametrize("metadata", ["omitted_latest", "tied_latest", "undated"])
+def test_search1_valid_retained_latest_metadata_and_unknowns(modules, metadata):
+    source, _ = modules
+    packet = hydrated_mail(missing=True)
+    wrapper = packet["collections"][0]["evidence"]
+    search = wrapper["search"]
+    thread = search["threads"][0]
+    if metadata == "omitted_latest":
+        thread.update(
+            message_count=2,
+            messages_omitted=1,
+            thread_latest_message_id="a002",
+            thread_latest_message_date="2020-11-02T00:00:00Z",
+        )
+    elif metadata == "tied_latest":
+        thread["messages"].append(
+            {**thread["messages"][0], "messageId": "a002", "labelIds": ["SENT"]}
+        )
+        thread.update(
+            message_count=2, thread_latest_message_id=None, thread_latest_message_from="unknown"
+        )
+        wrapper["body_reads_omitted"] = 2
+        wrapper["errors"].append({"message_id": "a002", "kind": "body_unavailable"})
+    else:
+        thread["messages"][0]["internalDate"] = None
+        thread.update(
+            thread_latest_message_id=None,
+            thread_latest_message_date=None,
+            thread_latest_message_from="unknown",
+        )
+    observations, scopes = source.prepare(packet)
+    assert observations and not any(item["complete"] for item in scopes)

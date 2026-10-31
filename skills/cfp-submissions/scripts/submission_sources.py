@@ -23,7 +23,7 @@ import hashlib
 import json
 import re
 import unicodedata
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from html.parser import HTMLParser
 from urllib.parse import urlsplit
 
@@ -590,7 +590,10 @@ def mail_fields(family, subject, body):
             "following sessions have not been accepted for " in body
             or "unable to include your session(s) in the final program of " in body
         ):
-            result.update(event_name=subject.removeprefix("Your sessions at "), status="declined")
+            name = " ".join(subject.removeprefix("Your sessions at ").split())
+            result.update(
+                event_name=name if 0 < len(name) <= MAX_CLAIM_TEXT else None, status="declined"
+            )
     elif re.match(r"\[[A-Za-z0-9_-]+\] Your proposal ", subject):
         refused = re.fullmatch(r"\[[A-Za-z0-9_-]+\] Your proposal has been refused : (.+)", subject)
         accepted = re.fullmatch(
@@ -637,6 +640,201 @@ def mail_bytes(value):
         raise SourceError("mail_encoding; retain the unsupported provider evidence") from error
 
 
+def mail_search(search):
+    """Validate the published search1 envelope, including nested metadata.
+
+    Original coverage remains authoritative; a false flag need not have a
+    visible gap (the invocation may have started at a continuation token).
+    Latest-message metadata can name an omitted message, never an invented
+    complete retained inventory. Values are read unchanged, not normalized.
+    """
+    require(
+        isinstance(search, dict)
+        and set(search)
+        == {"schema_version", "threads", "next_page_token", "threads_omitted", "complete", "errors"}
+        and type(search["schema_version"]) is int
+        and search["schema_version"] == 1,
+        "mail_search_version",
+    )
+    require(mail_bytes(search) <= MAX_MAIL_SEARCH_BYTES, "mail_search_bounds")
+    require(
+        type(search["complete"]) is bool
+        and type(search["threads_omitted"]) is int
+        and search["threads_omitted"] >= 0
+        and (
+            search["next_page_token"] is None
+            or isinstance(search["next_page_token"], str)
+            and 0 < len(search["next_page_token"].encode()) <= 2000
+        ),
+        "mail_search_coverage",
+    )
+    simple_errors = {
+        "page_limit_exceeded",
+        "page_token_too_large",
+        "repeated_page_token",
+        "invalid_thread_id",
+    }
+    thread_errors = {
+        "thread_unavailable",
+        "thread_shape",
+        "thread_identity",
+        "malformed_payload",
+        "malformed_thread",
+    }
+    errors = list_value(search["errors"], "mail_search_errors")
+    for error in errors:
+        require(isinstance(error, dict) and isinstance(error.get("kind"), str), "mail_search_error")
+        kind = error["kind"]
+        require(
+            kind in simple_errors
+            and set(error) == {"kind"}
+            or kind in thread_errors
+            and set(error) == {"thread_id", "kind"}
+            and isinstance(error["thread_id"], str)
+            and MAIL_ID.fullmatch(error["thread_id"]),
+            "mail_search_error",
+        )
+    threads = list_value(search["threads"], "mail_threads")
+    require(len(threads) <= 30, "mail_threads")  # Published three pages of at most ten stubs.
+    originals, pending, tids = {}, {}, set()
+    gap = bool(errors or search["threads_omitted"] or search["next_page_token"])
+    for thread in threads:
+        require(
+            isinstance(thread, dict)
+            and set(thread)
+            == {
+                "thread_id",
+                "citation_url",
+                "source_trust",
+                "messages",
+                "message_count",
+                "complete",
+                "thread_latest_message_from",
+                "thread_latest_message_id",
+                "thread_latest_message_date",
+                "messages_omitted",
+            },
+            "mail_thread_shape",
+        )
+        tid = bounded(thread["thread_id"], 128)
+        require(MAIL_ID.fullmatch(tid) and tid not in tids, "mail_thread_identity")
+        tids.add(tid)
+        require(
+            thread["citation_url"] == f"https://mail.google.com/mail/u/0/#all/{tid}"
+            and thread["source_trust"] == "untrusted",
+            "mail_thread_binding",
+        )
+        messages = list_value(thread["messages"], "mail_messages")
+        require(
+            type(thread["message_count"]) is int
+            and thread["message_count"] > 0
+            and type(thread["messages_omitted"]) is int
+            and thread["messages_omitted"] >= 0
+            and thread["message_count"] == len(messages) + thread["messages_omitted"]
+            and type(thread["complete"]) is bool,
+            "mail_thread_coverage",
+        )
+        dated, undated, body_gap = [], False, False
+        for message in messages:
+            require(
+                isinstance(message, dict)
+                and set(message)
+                == {
+                    "messageId",
+                    "from",
+                    "to",
+                    "subject",
+                    "internalDate",
+                    "labelIds",
+                    "body",
+                    "body_complete",
+                },
+                "mail_message_shape",
+            )
+            mid = bounded(message["messageId"], 128)
+            require(MAIL_ID.fullmatch(mid) and mid not in originals, "mail_message_identity")
+            for key in ("from", "to", "subject"):
+                bounded(message[key], 300)
+            labels = list_value(message["labelIds"], "mail_message_labels")
+            require(
+                all(isinstance(label, str) and 0 < len(label) <= 200 for label in labels),
+                "mail_message_labels",
+            )
+            require(type(message["body_complete"]) is bool, "mail_body_coverage")
+            bounded(message["body"], 6000)
+            if message["internalDate"] is None:
+                undated = True
+            else:
+                stamp = observation_clock(message["internalDate"])
+                require(stamp.utcoffset() == timedelta(0), "mail_message_date")
+                dated.append((stamp, mid, "me" if "SENT" in labels else "them"))
+            originals[mid] = (tid, message)
+            require(len(originals) <= MAX_MAIL_READS, "mail_message_bounds")
+            body_gap |= not message["body_complete"]
+            if not message["body_complete"]:
+                pending[mid] = (tid, message)
+        direction, latest_id, latest_date = (
+            thread[key]
+            for key in (
+                "thread_latest_message_from",
+                "thread_latest_message_id",
+                "thread_latest_message_date",
+            )
+        )
+        require(
+            isinstance(direction, str)
+            and direction in {"me", "them", "unknown"}
+            and (latest_id is None or isinstance(latest_id, str) and MAIL_ID.fullmatch(latest_id)),
+            "mail_latest_metadata",
+        )
+        if latest_date is None:
+            require(latest_id is None and direction == "unknown", "mail_latest_metadata")
+        else:
+            latest = observation_clock(latest_date)
+            require(
+                latest.utcoffset() == timedelta(0)
+                and not undated
+                and all(item[0] <= latest for item in dated),
+                "mail_latest_metadata",
+            )
+            if not thread["messages_omitted"]:
+                newest = max(item[0] for item in dated)
+                tied = [item for item in dated if item[0] == newest]
+                directions = {item[2] for item in tied}
+                require(
+                    latest == newest
+                    and latest_id == (tied[0][1] if len(tied) == 1 else None)
+                    and direction
+                    == (next(iter(directions)) if len(directions) == 1 else "unknown"),
+                    "mail_latest_metadata",
+                )
+        if undated:
+            require(latest_date is None, "mail_latest_metadata")
+        elif not thread["messages_omitted"]:
+            require(latest_date is not None, "mail_latest_metadata")
+        for error in errors:
+            if error.get("thread_id") == tid:
+                require(
+                    error["kind"] == "malformed_payload" and not thread["complete"],
+                    "mail_thread_coverage",
+                )
+        if latest_id is not None:
+            retained = next((item for item in dated if item[1] == latest_id), None)
+            require(retained is not None or thread["messages_omitted"] > 0, "mail_latest_metadata")
+            if retained is not None:
+                require(
+                    latest_date is not None
+                    and retained[0] == observation_clock(latest_date)
+                    and retained[2] == direction,
+                    "mail_latest_metadata",
+                )
+        thread_gap = undated or body_gap or bool(thread["messages_omitted"])
+        require(not thread["complete"] or not thread_gap, "mail_thread_coverage")
+        gap |= not thread["complete"] or thread_gap
+    require(not search["complete"] or not gap, "mail_search_coverage")
+    return originals, pending
+
+
 def mail_handoff(wrapper):
     """Validate wrapper1 before any import; return unchanged search1 and bound reads.
 
@@ -654,55 +852,7 @@ def mail_handoff(wrapper):
     )
     require(mail_bytes(wrapper) <= MAX_MAIL_WRAPPER_BYTES, "mail_handoff_bounds")
     search = wrapper["search"]
-    require(
-        isinstance(search, dict)
-        and set(search)
-        == {"schema_version", "threads", "next_page_token", "threads_omitted", "complete", "errors"}
-        and type(search["schema_version"]) is int
-        and search["schema_version"] == 1,
-        "mail_search_version",
-    )
-    require(mail_bytes(search) <= MAX_MAIL_SEARCH_BYTES, "mail_search_bounds")
-    require(
-        type(search["complete"]) is bool
-        and isinstance(search["errors"], list)
-        and type(search["threads_omitted"]) is int
-        and search["threads_omitted"] >= 0
-        and (
-            search["next_page_token"] is None
-            or isinstance(search["next_page_token"], str)
-            and 0 < len(search["next_page_token"].encode()) <= 2000
-        ),
-        "mail_search_coverage",
-    )
-    threads = list_value(search["threads"], "mail_threads")
-    require(len(threads) <= MAX_MAIL_READS, "mail_threads")
-    originals, pending, thread_ids = {}, {}, set()
-    search_gap = bool(search["errors"] or search["threads_omitted"] or search["next_page_token"])
-    for thread in threads:
-        require(isinstance(thread, dict), "mail_thread_shape")
-        tid = bounded(thread.get("thread_id"), 128)
-        require(MAIL_ID.fullmatch(tid) and tid not in thread_ids, "mail_thread_identity")
-        thread_ids.add(tid)
-        require(
-            type(thread.get("complete")) is bool
-            and type(thread.get("messages_omitted")) is int
-            and thread["messages_omitted"] >= 0,
-            "mail_thread_coverage",
-        )
-        search_gap |= not thread["complete"] or bool(thread["messages_omitted"])
-        for message in list_value(thread.get("messages"), "mail_messages"):
-            require(isinstance(message, dict), "mail_message_shape")
-            mid = bounded(message.get("messageId"), 128)
-            require(MAIL_ID.fullmatch(mid) and mid not in originals, "mail_message_identity")
-            require(type(message.get("body_complete")) is bool, "mail_body_coverage")
-            bounded(message.get("body"), 6000)
-            originals[mid] = (tid, message)
-            require(len(originals) <= MAX_MAIL_READS, "mail_message_bounds")
-            search_gap |= not message["body_complete"] or message.get("internalDate") is None
-            if not message["body_complete"]:
-                pending[mid] = (tid, message)
-    require(not search["complete"] or not search_gap, "mail_search_coverage")
+    _, pending = mail_search(search)
     reads, errors = {}, {}
     for read in list_value(wrapper["body_reads"], "mail_body_reads"):
         require(
@@ -800,18 +950,8 @@ def mail(request):
         body_reads = {}
         if request["schema_version"] == 2:
             evidence, body_reads = mail_handoff(evidence)
-        require(
-            isinstance(evidence, dict)
-            and type(evidence.get("schema_version")) is int
-            and evidence["schema_version"] == 1,
-            "mail_evidence_version",
-        )
-        threads = list_value(evidence.get("threads"), "mail_threads")
-        require(len(threads) <= MAX_MESSAGES, "mail_threads")
-        require(
-            type(evidence.get("complete")) is bool and isinstance(evidence.get("errors"), list),
-            "mail_coverage",
-        )
+        mail_search(evidence)
+        threads = evidence["threads"]
         gaps = []
         if (
             not evidence["complete"]
@@ -836,7 +976,9 @@ def mail(request):
                 identifier = bounded(message.get("messageId"), 128)
                 require(MAIL_ID.fullmatch(identifier), "mail_message_identity")
                 subject = bounded(message.get("subject"), 2000)
-                source_at = bounded(message.get("internalDate"), 40)
+                source_at = message["internalDate"]
+                if source_at is None:
+                    gaps.append("message date unavailable; no source ordering proof")
                 require(type(message.get("body_complete")) is bool, "mail_body_coverage")
                 raw_body = bounded(message.get("body"), MAX_BODY)
                 body_complete = message["body_complete"]

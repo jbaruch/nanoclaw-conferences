@@ -8,7 +8,7 @@ manual: same input, restricted to an owner-declared fact and owner citation.
 query: {start: ISO date, end: ISO date} (inclusive event-date overlap).
 history: same range, also returns known inactive submission history.
 bind: {identity: <identity>, evidence_id, owner_binding: <binding1>}.
-import: source1 Sessionize/search-mail or source2 hydrated mail packet; all
+import: source1 Sessionize/search-mail only; source2 is private-receipt-only. All
         observations/coverage validate before one ledger commit. Result has
         recorded/changed/observations/identities_resolved/ledger_sha256.
 import-mail-artifacts: request1 collections of family/scope/observed_at/receipt1;
@@ -670,9 +670,64 @@ def owner_failure(returncode, stderr):
     """Classify bounded maintained-owner diagnostics without returning paths/data."""
     if type(returncode) is not int or not -255 <= returncode <= 255:
         raise RuntimeError("unexpected_owner_exit_status")
-    code, recovery = "cfp_owner_failed", "Inspect actual owner results before any explicit retry."
+    code, recovery = (
+        "cfp_owner_failed",
+        "Inspect the supported owner installation and retained state; "
+        "do not assume commit or retry.",
+    )
     if len(stderr.encode("utf-8", errors="backslashreplace")) <= 4096:
-        if stderr.startswith("commit-state: could not acquire "):
+        if stderr.startswith(
+            (
+                "commit-state: invalid CFP_STATE_LOCK_TIMEOUT value ",
+                "commit-state: invalid lock timeout ",
+            )
+        ):
+            code, recovery = (
+                "cfp_owner_lock_configuration",
+                "Fix or unset the documented CFP lock timeout; preserve retained state.",
+            )
+        elif re.fullmatch(
+            r"commit-state: .+ root is [A-Za-z_][A-Za-z_0-9]*, expected a JSON object "
+            r"— restore or repair the file and rerun\n?",
+            stderr,
+        ):
+            code, recovery = (
+                "cfp_owner_damaged",
+                "Restore a supported object-shaped CFP state from the owner's backup.",
+            )
+        elif stderr.startswith(
+            (
+                "commit-state: cannot fingerprint source snapshot:",
+                "commit-state: cannot fingerprint stored source:",
+            )
+        ):
+            code, recovery = (
+                "cfp_owner_fingerprint",
+                "Repair nonfinite or unsupported source/stored records "
+                "through the existing CFP owner.",
+            )
+        elif stderr.startswith(
+            (
+                "commit-state: stdin is not valid JSON:",
+                "commit-state: stdin root is ",
+                "commit-state: refusing to write config/heartbeat key ",
+                "commit-state: record for ",
+                "commit-state: supply one ",
+                "commit-state: unique CFP reference requires guarded commit mode",
+            )
+        ):
+            code, recovery = (
+                "cfp_owner_input",
+                "Repair the documented guarded CFP request; preserve state "
+                "and do not retry unchanged input.",
+            )
+        elif stderr.startswith("commit-state: cannot read source fingerprints:"):
+            code, recovery = (
+                "cfp_owner_snapshot",
+                "Restore the documented source-fingerprint input "
+                "before retrying guarded reconciliation.",
+            )
+        elif stderr.startswith("commit-state: could not acquire "):
             code, recovery = "cfp_owner_busy", "Wait for the active CFP writer to finish."
         elif stderr.startswith(("commit-state: cannot read ", "commit-state: cannot write ")):
             if ": PermissionError:" in stderr:
@@ -990,6 +1045,15 @@ def main(argv=None):
                 observations, scopes = prepare(source)
                 return record_many(LEDGER, observations, scopes)
 
+            if args.action == "import" and (
+                not isinstance(request, dict)
+                or type(request.get("schema_version")) is not int
+                or request["schema_version"] != 1
+            ):
+                raise Hold(
+                    "source_transport; use import-mail-artifacts with the maintained "
+                    "private receipt for hydrated mail"
+                )
             result = (
                 import_artifacts(request, commit)
                 if args.action == "import-mail-artifacts"

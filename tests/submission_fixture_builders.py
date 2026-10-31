@@ -1529,7 +1529,8 @@ def mail_packet():
                     "schema_version": 1,
                     "threads": [
                         {
-                            "thread_id": "example-thread-0",
+                            "thread_id": "b001",
+                            "citation_url": "https://mail.google.com/mail/u/0/#all/b001",
                             "source_trust": "untrusted",
                             "messages": [
                                 {
@@ -1552,10 +1553,13 @@ def mail_packet():
                             "message_count": 1,
                             "complete": True,
                             "thread_latest_message_from": "them",
+                            "thread_latest_message_id": "a001",
+                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
                             "messages_omitted": 0,
                         },
                         {
-                            "thread_id": "example-thread-1",
+                            "thread_id": "b002",
+                            "citation_url": "https://mail.google.com/mail/u/0/#all/b002",
                             "source_trust": "untrusted",
                             "messages": [
                                 {
@@ -1578,10 +1582,13 @@ def mail_packet():
                             "message_count": 1,
                             "complete": True,
                             "thread_latest_message_from": "them",
+                            "thread_latest_message_id": "a002",
+                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
                             "messages_omitted": 0,
                         },
                         {
-                            "thread_id": "example-thread-2",
+                            "thread_id": "b003",
+                            "citation_url": "https://mail.google.com/mail/u/0/#all/b003",
                             "source_trust": "untrusted",
                             "messages": [
                                 {
@@ -1604,6 +1611,8 @@ def mail_packet():
                             "message_count": 1,
                             "complete": True,
                             "thread_latest_message_from": "them",
+                            "thread_latest_message_id": "a003",
+                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
                             "messages_omitted": 0,
                         },
                     ],
@@ -1621,7 +1630,8 @@ def mail_packet():
                     "schema_version": 1,
                     "threads": [
                         {
-                            "thread_id": "example-thread-3",
+                            "thread_id": "b004",
+                            "citation_url": "https://mail.google.com/mail/u/0/#all/b004",
                             "source_trust": "untrusted",
                             "messages": [
                                 {
@@ -1649,6 +1659,8 @@ def mail_packet():
                             "message_count": 1,
                             "complete": True,
                             "thread_latest_message_from": "them",
+                            "thread_latest_message_id": "a004",
+                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
                             "messages_omitted": 0,
                         }
                     ],
@@ -1666,7 +1678,8 @@ def mail_packet():
                     "schema_version": 1,
                     "threads": [
                         {
-                            "thread_id": "example-thread-4",
+                            "thread_id": "b005",
+                            "citation_url": "https://mail.google.com/mail/u/0/#all/b005",
                             "source_trust": "untrusted",
                             "messages": [
                                 {
@@ -1760,6 +1773,8 @@ def mail_packet():
                             "message_count": 3,
                             "complete": True,
                             "thread_latest_message_from": "them",
+                            "thread_latest_message_id": None,
+                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
                             "messages_omitted": 0,
                         }
                     ],
@@ -1777,7 +1792,8 @@ def mail_packet():
                     "schema_version": 1,
                     "threads": [
                         {
-                            "thread_id": "example-thread-7",
+                            "thread_id": "b008",
+                            "citation_url": "https://mail.google.com/mail/u/0/#all/b008",
                             "source_trust": "untrusted",
                             "messages": [
                                 {
@@ -1800,10 +1816,13 @@ def mail_packet():
                             "message_count": 1,
                             "complete": True,
                             "thread_latest_message_from": "them",
+                            "thread_latest_message_id": "a008",
+                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
                             "messages_omitted": 0,
                         },
                         {
-                            "thread_id": "example-thread-8",
+                            "thread_id": "b009",
+                            "citation_url": "https://mail.google.com/mail/u/0/#all/b009",
                             "source_trust": "untrusted",
                             "messages": [
                                 {
@@ -1824,10 +1843,13 @@ def mail_packet():
                             "message_count": 1,
                             "complete": True,
                             "thread_latest_message_from": "them",
+                            "thread_latest_message_id": "a009",
+                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
                             "messages_omitted": 0,
                         },
                         {
-                            "thread_id": "example-thread-9",
+                            "thread_id": "b00a",
+                            "citation_url": "https://mail.google.com/mail/u/0/#all/b00a",
                             "source_trust": "untrusted",
                             "messages": [
                                 {
@@ -1848,6 +1870,8 @@ def mail_packet():
                             "message_count": 1,
                             "complete": True,
                             "thread_latest_message_from": "them",
+                            "thread_latest_message_id": "a00a",
+                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
                             "messages_omitted": 0,
                         },
                     ],
@@ -1865,7 +1889,8 @@ def mail_packet():
                     "schema_version": 1,
                     "threads": [
                         {
-                            "thread_id": "example-thread-10",
+                            "thread_id": "b004",
+                            "citation_url": "https://mail.google.com/mail/u/0/#all/b004",
                             "source_trust": "untrusted",
                             "messages": [
                                 {
@@ -1893,10 +1918,13 @@ def mail_packet():
                             "message_count": 1,
                             "complete": True,
                             "thread_latest_message_from": "them",
+                            "thread_latest_message_id": "a004",
+                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
                             "messages_omitted": 0,
                         },
                         {
-                            "thread_id": "example-thread-11",
+                            "thread_id": "b00c",
+                            "citation_url": "https://mail.google.com/mail/u/0/#all/b00c",
                             "source_trust": "untrusted",
                             "messages": [
                                 {
@@ -1925,10 +1953,13 @@ def mail_packet():
                             "message_count": 1,
                             "complete": True,
                             "thread_latest_message_from": "them",
+                            "thread_latest_message_id": "a00c",
+                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
                             "messages_omitted": 0,
                         },
                         {
-                            "thread_id": "example-thread-12",
+                            "thread_id": "b00d",
+                            "citation_url": "https://mail.google.com/mail/u/0/#all/b00d",
                             "source_trust": "untrusted",
                             "messages": [
                                 {
@@ -1957,6 +1988,8 @@ def mail_packet():
                             "message_count": 1,
                             "complete": True,
                             "thread_latest_message_from": "them",
+                            "thread_latest_message_id": "a00d",
+                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
                             "messages_omitted": 0,
                         },
                     ],
@@ -1974,7 +2007,8 @@ def mail_packet():
                     "schema_version": 1,
                     "threads": [
                         {
-                            "thread_id": "example-thread-13",
+                            "thread_id": "b00e",
+                            "citation_url": "https://mail.google.com/mail/u/0/#all/b00e",
                             "source_trust": "untrusted",
                             "messages": [
                                 {
@@ -2000,10 +2034,13 @@ def mail_packet():
                             "message_count": 1,
                             "complete": True,
                             "thread_latest_message_from": "them",
+                            "thread_latest_message_id": "a00e",
+                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
                             "messages_omitted": 0,
                         },
                         {
-                            "thread_id": "example-thread-14",
+                            "thread_id": "b00f",
+                            "citation_url": "https://mail.google.com/mail/u/0/#all/b00f",
                             "source_trust": "untrusted",
                             "messages": [
                                 {
@@ -2029,10 +2066,13 @@ def mail_packet():
                             "message_count": 1,
                             "complete": True,
                             "thread_latest_message_from": "them",
+                            "thread_latest_message_id": "a00f",
+                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
                             "messages_omitted": 0,
                         },
                         {
-                            "thread_id": "example-thread-15",
+                            "thread_id": "b010",
+                            "citation_url": "https://mail.google.com/mail/u/0/#all/b010",
                             "source_trust": "untrusted",
                             "messages": [
                                 {
@@ -2058,6 +2098,8 @@ def mail_packet():
                             "message_count": 1,
                             "complete": True,
                             "thread_latest_message_from": "them",
+                            "thread_latest_message_id": "a010",
+                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
                             "messages_omitted": 0,
                         },
                     ],

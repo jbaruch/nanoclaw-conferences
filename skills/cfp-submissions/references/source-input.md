@@ -66,9 +66,9 @@ Exact outer fields:
 }
 ```
 
-This source1 format is retained unchanged for previously collected search1 evidence. New full-hydration collection uses source2 below.
+This source1 format is retained unchanged for previously collected search1 evidence and is the only format accepted by the public `import` action. New full-hydration collection uses the receipt-backed action below; source2 is constructed internally, never accepted as raw CLI stdin.
 
-`evidence` is the maintained Admin search-mail schema1 envelope. Preserve each thread's `messages`, `complete`, `messages_omitted`; each message's actual `messageId`, `subject`, bound `internalDate`, complete sanitized `body` and `body_complete`. Keep other owner-returned fields unchanged in the private packet. A full-body helper without its identity-matched search date is insufficient; never substitute collection time. No continuation token or error text is copied into coverage: only finite gaps are retained. Collection and message limits are owned by the named script constants and the `mail` input validator. Split at actual collection boundaries without calling an incomplete scope complete.
+`evidence` is the maintained Admin search-mail schema1 envelope. Preserve each thread's `messages`, `complete`, `messages_omitted`; each message's actual `messageId`, `subject`, bound `internalDate`, complete sanitized `body` and `body_complete`. Keep every owner-returned nested field unchanged in the private packet. The `mail_search` validator checks the complete published thread/message/error shapes, native identities, citation/trust binding, counts, latest-message metadata and coverage relationships before any import. Missing dates and omitted latest messages remain explicit unknowns; validation never fabricates metadata to make an input pass. A full-body helper without its identity-matched search date is insufficient; never substitute collection time. No continuation token or error text is copied into coverage: only finite gaps are retained. Collection and message limits are owned by the named script constants and the `mail` input validator. Split at actual collection boundaries without calling an incomplete scope complete.
 
 
 ### Full-body handoff: mail source2

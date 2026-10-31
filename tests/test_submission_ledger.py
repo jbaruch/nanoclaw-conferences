@@ -1012,3 +1012,32 @@ def test_actual_owner_lock_contention_is_not_a_backup_repair(
         assert state.read_bytes() == before and "backup" not in str(caught.value)
     finally:
         os.close(fd)
+
+
+@pytest.mark.parametrize(
+    "failure,expected",
+    [
+        ("lock", "cfp_owner_lock_configuration"),
+        ("state_root", "cfp_owner_damaged"),
+        ("fingerprint", "cfp_owner_fingerprint"),
+        ("snapshot", "cfp_owner_snapshot"),
+    ],
+)
+def test_real_owner_finite_failure_recovery(ledger, tmp_path, monkeypatch, failure, expected):
+    state = tmp_path / "private-cfp.json"
+    state.write_text("[]" if failure == "state_root" else "{}")
+    state.chmod(0o600)
+    before = state.read_bytes()
+    if failure == "lock":
+        monkeypatch.setenv("CFP_STATE_LOCK_TIMEOUT", "PRIVATE-invalid")
+    arguments = ["--snapshot"] if failure == "fingerprint" else ["--state", str(state)]
+    if failure == "snapshot":
+        expected_file = tmp_path / "private-fingerprints.json"
+        expected_file.write_text("invalid json")
+        arguments += ["--expected-digests", str(expected_file)]
+    value = {"example": {"unsupported": float("nan")}} if failure == "fingerprint" else {}
+    with pytest.raises(ledger.Hold, match=expected) as caught:
+        ledger.owner_call(ledger.cfp_owner(), arguments, value)
+    assert "PRIVATE" not in str(caught.value) and str(state) not in str(caught.value)
+    assert "exit_status=1" in str(caught.value)
+    assert state.read_bytes() == before
