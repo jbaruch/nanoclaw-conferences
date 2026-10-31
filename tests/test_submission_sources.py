@@ -325,7 +325,7 @@ def test_duplicate_mail_parses_known_receipt_before_dedup_in_either_collection_o
     assert first[0] == second[0] and len(first[0]) == 1
     assert first[0][0]["fact"]["status"] == "accepted"
     assert first[0][0]["fact"]["talk_title"] == "Example Talk"
-    assert first[0][0]["fact"]["observed_at"] == broad["observed_at"]
+    assert first[0][0]["fact"]["observed_at"] == specific["observed_at"]
     for _, scopes in [first, second]:
         assert len(scopes) == 2 and all(not scope["complete"] for scope in scopes)
         assert all(
@@ -1172,7 +1172,6 @@ def test_sessionize_enforces_native_dom_utf8_aggregate_bound(modules, dashboard,
     source, _ = modules
     capture = dashboard["capture"]
     # The Host bounds the compact native DOM before adding its scope metadata.
-    capture["scope"] = "Synthetic captured scope " * 50
 
     def native_bytes():
         return len(
@@ -1355,3 +1354,187 @@ def test_sessionize_refuses_a_non_body_native_root(modules, dashboard):
     dashboard["capture"]["nodes"][0]["tag"] = "DIV"
     with pytest.raises(source.SourceError, match="capture_tree"):
         source.prepare(dashboard)
+
+
+@pytest.mark.parametrize(
+    "scope", ["arbitrary collection", "future version", "Complete rendered node tree"]
+)
+def test_sessionize_requires_the_exact_published_capture_scope(modules, dashboard, scope):
+    source, _ = modules
+    dashboard["capture"]["scope"] = scope
+    with pytest.raises(source.SourceError, match="capture_provenance"):
+        source.prepare(dashboard)
+
+
+def failed_stub_packet(source_version, retained, omitted, errors):
+    capture = deepcopy(mail_packet()["collections"][-1])
+    template = capture["evidence"]["threads"][1]
+    threads = []
+    for index in range(retained):
+        thread = deepcopy(template)
+        tid, mid = f"b{index:03x}", f"c{index:03x}"
+        thread.update(
+            thread_id=tid,
+            citation_url=f"https://mail.google.com/mail/u/0/#all/{tid}",
+            thread_latest_message_id=mid,
+        )
+        thread["messages"][0]["messageId"] = mid
+        threads.append(thread)
+    search = capture["evidence"]
+    search.update(threads=threads, threads_omitted=omitted, errors=errors, complete=False)
+    if source_version == 2:
+        capture["evidence"] = {
+            "schema_version": 1,
+            "search": search,
+            "body_reads": [],
+            "body_reads_omitted": 0,
+            "complete": False,
+            "errors": [],
+        }
+    return {"schema_version": source_version, "source": "mail", "collections": [capture]}
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "invalid_thread_id",
+        "thread_unavailable",
+        "thread_shape",
+        "thread_identity",
+        "malformed_thread",
+    ],
+)
+@pytest.mark.parametrize("excess", [0, 1])
+def test_failed_stubs_share_the_native_search_page_budget(modules, source_version, kind, excess):
+    source, _ = modules
+    error = {"kind": kind}
+    if kind != "invalid_thread_id":
+        error["thread_id"] = "fff1"
+    packet = failed_stub_packet(source_version, 29 + excess, 0, [error])
+    if excess:
+        with pytest.raises(source.SourceError, match="mail_threads"):
+            source.prepare(packet)
+    else:
+        observations, scopes = source.prepare(packet)
+        assert len(observations) == 29 and not scopes[0]["complete"]
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize("retained", [28, 29])
+def test_failed_malformed_stub_counts_once_alongside_byte_omissions(
+    modules, source_version, retained
+):
+    source, _ = modules
+    errors = [
+        {"kind": "malformed_payload", "thread_id": "fff1"},
+        {"kind": "malformed_thread", "thread_id": "fff1"},
+    ]
+    packet = failed_stub_packet(source_version, retained, 1, errors)
+    if retained == 29:
+        with pytest.raises(source.SourceError, match="mail_threads"):
+            source.prepare(packet)
+    else:
+        assert len(source.prepare(packet)[0]) == 28
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize("omitted", [0, 1])
+def test_byte_omitted_malformed_record_uses_its_existing_omission_slot(
+    modules, source_version, omitted
+):
+    source, _ = modules
+    packet = failed_stub_packet(
+        source_version, 29, omitted, [{"kind": "malformed_payload", "thread_id": "fff1"}]
+    )
+    if omitted:
+        assert len(source.prepare(packet)[0]) == 29
+    else:
+        with pytest.raises(source.SourceError, match="mail_search_coverage"):
+            source.prepare(packet)
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_duplicate_collection_advances_existing_fact_to_latest_sighting(
+    modules, mail, tmp_path, reverse
+):
+    source, owner = modules
+    capture = deepcopy(mail["collections"][-1])
+    capture["evidence"]["threads"] = [capture["evidence"]["threads"][1]]
+    capture["evidence"].update(complete=True, next_page_token=None, threads_omitted=0, errors=[])
+    capture["observed_at"] = "2020-12-01T10:30:00Z"
+    path = tmp_path / "ledger"
+    initial = source.prepare({"schema_version": 1, "source": "mail", "collections": [capture]})
+    owner.record_many(path, *initial)
+    before = owner.read(path)
+    early, late = deepcopy(capture), deepcopy(capture)
+    early["family"], early["scope"] = "cfpdev", "independent broader query"
+    early["observed_at"], late["observed_at"] = "2020-12-01T10:00:00Z", "2020-12-01T11:00:00Z"
+    collections = [late, early] if reverse else [early, late]
+    observations, scopes = source.prepare(
+        {"schema_version": 1, "source": "mail", "collections": collections}
+    )
+    assert len(observations) == 1
+    assert observations[0]["fact"]["observed_at"] == late["observed_at"]
+    owner.record_many(path, observations, scopes)
+    after = owner.read(path)
+    assert set(after["unresolved"]) == set(before["unresolved"])
+    old = next(iter(before["unresolved"].values()))
+    new = next(iter(after["unresolved"].values()))
+    assert new["evidence_id"] == old["evidence_id"]
+    assert new["source_at"] == old["source_at"]
+    assert new["observed_at"] == late["observed_at"]
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+def test_retained_malformed_payload_does_not_consume_an_extra_stub(modules, source_version):
+    source, _ = modules
+    packet = failed_stub_packet(
+        source_version, 30, 0, [{"kind": "malformed_payload", "thread_id": "b000"}]
+    )
+    search = packet["collections"][0]["evidence"]
+    if source_version == 2:
+        search = search["search"]
+    search["threads"][0]["complete"] = False
+    assert len(source.prepare(packet)[0]) == 30
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize(
+    "kinds",
+    [
+        ["thread_unavailable", "thread_unavailable"],
+        ["malformed_payload", "thread_unavailable"],
+        ["thread_shape", "thread_identity"],
+        ["malformed_thread", "malformed_payload"],
+    ],
+)
+def test_one_lookup_cannot_have_duplicate_or_incompatible_failure_stages(
+    modules, source_version, kinds
+):
+    source, _ = modules
+    packet = failed_stub_packet(
+        source_version, 1, 0, [{"kind": kind, "thread_id": "fff1"} for kind in kinds]
+    )
+    with pytest.raises(source.SourceError, match="mail_search_error"):
+        source.prepare(packet)
+
+
+@pytest.mark.parametrize("reverse", [False, True])
+def test_equal_instant_sightings_use_a_deterministic_literal_tie_break(modules, mail, reverse):
+    source, _ = modules
+    capture = deepcopy(mail["collections"][-1])
+    capture["evidence"]["threads"] = [capture["evidence"]["threads"][1]]
+    capture["evidence"].update(complete=True, next_page_token=None, threads_omitted=0, errors=[])
+    other = deepcopy(capture)
+    capture["observed_at"], other["observed_at"] = (
+        "2020-12-01T11:00:00Z",
+        "2020-12-01T13:00:00+02:00",
+    )
+    collections = [other, capture] if reverse else [capture, other]
+    observations, _ = source.prepare(
+        {"schema_version": 1, "source": "mail", "collections": collections}
+    )
+    assert observations[0]["fact"]["observed_at"] == max(
+        capture["observed_at"], other["observed_at"]
+    )

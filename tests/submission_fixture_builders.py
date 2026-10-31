@@ -15,8 +15,9 @@ def sessionize_packet():
             "origin": "https://sessionize.com",
             "path": "/app/speaker/events",
             "title": "My events - Speaker profile @ Sessionize.com",
-            "scope": "renderedDOMtext+containednon-editlinkpaths only; "
-            "query/fragment/forms/inputvalues/storage/cookies never read",
+            "scope": "Complete rendered node tree of the observed My Events view; forms, hidden "
+            "content, credential/storage values and unsafe links excluded. Account/filter/history "
+            "completeness remains unknown until consumer validation.",
             "nodes": [
                 {"tag": "BODY", "parent": None, "classes": "fixed-sidebar sz-refresh", "text": ""},
                 {"tag": "DIV", "parent": 0, "classes": "", "text": ""},

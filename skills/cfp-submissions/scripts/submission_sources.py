@@ -29,6 +29,11 @@ from urllib.parse import urlsplit
 
 MAX_NODES = 12000
 MAX_CAPTURE_BYTES = 1_500_000
+SESSIONIZE_SCOPE = (
+    "Complete rendered node tree of the observed My Events view; forms, hidden content, "
+    "credential/storage values and unsafe links excluded. Account/filter/history completeness "
+    "remains unknown until consumer validation."
+)
 MAX_MESSAGES = 1000
 MAX_BODY = 256 * 1024
 MAX_CLAIM_TEXT = 300
@@ -343,7 +348,7 @@ def sessionize(request):
         "capture_shape",
     )
     require(
-        native_string(capture["title"], 300).strip() and bounded(capture["scope"]).strip(),
+        native_string(capture["title"], 300).strip() and capture["scope"] == SESSIONIZE_SCOPE,
         "capture_provenance",
     )
     require(
@@ -703,6 +708,8 @@ def mail_search(search):
         "malformed_thread",
     }
     errors = list_value(search["errors"], "mail_search_errors")
+    failed_stubs: dict[str, set[str]] = {}
+    invalid_stubs = 0
     for error in errors:
         require(isinstance(error, dict) and isinstance(error.get("kind"), str), "mail_search_error")
         kind = error["kind"]
@@ -715,8 +722,20 @@ def mail_search(search):
             and MAIL_ID.fullmatch(error["thread_id"]),
             "mail_search_error",
         )
+        if kind == "invalid_thread_id":
+            invalid_stubs += 1
+        elif kind in thread_errors:
+            stages = failed_stubs.setdefault(error["thread_id"], set())
+            # The producer may record malformed payload before parsing that
+            # same stub also fails. Other failure paths stop at their stage.
+            require(
+                not stages or stages == {"malformed_payload"} and kind == "malformed_thread",
+                "mail_search_error",
+            )
+            stages.add(kind)
     threads = list_value(search["threads"], "mail_threads")
-    # Retained and dropped threads share the published three-page stub budget.
+    # Reject oversized retained/omitted inventory before traversing its content;
+    # failed stub slots are included after the retained identities are known.
     require(len(threads) + search["threads_omitted"] <= MAX_MAIL_THREADS, "mail_threads")
     originals, pending, tids = {}, {}, set()
     gap = bool(errors or search["threads_omitted"] or search["next_page_token"])
@@ -856,6 +875,20 @@ def mail_search(search):
         thread_gap = undated or body_gap or bool(thread["messages_omitted"]) or malformed_payload
         require(thread["complete"] == (not thread_gap), "mail_thread_coverage")
         gap |= not thread["complete"] or thread_gap
+    dropped_malformed = sum(
+        tid not in tids and stages == {"malformed_payload"} for tid, stages in failed_stubs.items()
+    )
+    require(dropped_malformed <= search["threads_omitted"], "mail_search_coverage")
+    failed = sum(
+        tid not in tids and stages != {"malformed_payload"} for tid, stages in failed_stubs.items()
+    )
+    # A successfully parsed malformed thread can later be byte-cap omitted;
+    # its malformed_payload error is already covered by threads_omitted. A
+    # payload+parser failure consumes one distinct failed stub, not two.
+    require(
+        len(threads) + search["threads_omitted"] + invalid_stubs + failed <= MAX_MAIL_THREADS,
+        "mail_threads",
+    )
     require(not search["complete"] or not gap, "mail_search_coverage")
     return originals, pending
 
@@ -1052,7 +1085,7 @@ def mail(request):
                             "mail_template_conflict",
                         )
                         prior["fields"][field] = value
-                    if (clock, observed_at) < (prior["clock"], prior["observed_at"]):
+                    if (clock, observed_at) > (prior["clock"], prior["observed_at"]):
                         prior.update(clock=clock, observed_at=observed_at)
         scopes.append(scope_record(f"mail:{family}", scope, capture["observed_at"], gaps))
     for identifier, item in sorted(seen.items()):
