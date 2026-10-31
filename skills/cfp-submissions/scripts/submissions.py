@@ -1,19 +1,34 @@
 #!/usr/bin/env python3
-"""Format-independent CFP submissions owner. No network or provider operations.
+"""CFP submissions ledger owner and bounded source-import CLI. No network calls.
 
 One JSON stdin object per action; stdout is JSON, diagnostics go to stderr.
 record: {identity: {event: {namespace,id}, talk: {namespace,id}} | null,
          fact: <record1>, coverage?: <coverage1>}.
 manual: same input, restricted to an owner-declared fact and owner citation.
 query: {start: ISO date, end: ISO date} (inclusive event-date overlap).
+history: same range, also returns known inactive submission history.
+bind: {identity: <identity>, evidence_id, owner_binding: <binding1>}.
+import: source1 Sessionize rendered-tree or maintained mail packet; all
+        observations/coverage validate before one ledger commit. Result has
+        recorded/changed/observations/identities_resolved/ledger_sha256.
 reconcile: {identity: <identity>, slug: <existing exact CFP slug>}.
+sync: {}. Derived exact-reference CFP pass; reports each outcome, checked and
+      final ledger hashes, generation_changed and complete (not collection
+      completeness). Both derived actions use the existing guarded CFP owner.
+record/manual return recorded/changed/identity_resolved/ledger_sha256;
+bind returns bound/changed/ledger_sha256; query/history return matches,
+unresolved, coverage and an initialized ledger's canonical hash.
 The schema reference defines all fields. Inputs describe collected evidence;
 this owner does not authenticate a DOM, mail, source timestamp or owner message.
-There are deliberately no source-format adapters yet.
+Source1 inputs, fact1/binding1 fields and coverage are documented beside this
+owner. Unknown templates/identities remain unresolved; future/malformed state,
+unsafe files, conflicts, unsupported captures and capacity failures HOLD.
 
 Exit 0 emits a result, including preserved reconciliation conflicts; exit 1
 holds retained state and names recovery. Unexpected implementation errors
-propagate. Only an absent ledger is initialized by record/manual, never query.
+propagate. Only an absent ledger is initialized by record/manual/import.
+query/history/bind/reconcile/sync never initialize it. The scripts send
+nothing, create no provider objects and never advance heartbeat/cadence state.
 """
 
 from __future__ import annotations
@@ -33,7 +48,7 @@ from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from submission_sources import SourceError
+from submission_sources import SourceError, adapter_kind, material
 
 LEDGER = Path("/workspace/group/cfp-submissions.json")
 CFP_STATE = Path("/workspace/group/cfp-state.json")
@@ -391,11 +406,24 @@ def merge_observation(store, request, manual=False):
     evidence_id = observation["evidence_id"]
     found = store["unresolved"].get(evidence_id)
     found_key = None
+    found_identity = request["identity"]
     for identifier, row in store["rows"].items():
         if evidence_id in row["facts"]:
             found, found_key = row["facts"][evidence_id], identifier
+            found_identity = row["identity"]
+    refresh = (
+        found is not None
+        and material(found) == material(observation)
+        and adapter_kind(found_identity, found) is not None
+        and adapter_kind(found_identity, found) == adapter_kind(found_identity, observation)
+    )
+    if found is not None and refresh:
+        observation = {
+            **observation,
+            "observed_at": max([found["observed_at"], observation["observed_at"]], key=instant),
+        }
     if (
-        found == observation
+        (found == observation or refresh)
         and row_key is None
         and found_key is not None
         and evidence_id in store["rows"][found_key]["owner_bindings"]
@@ -403,7 +431,7 @@ def merge_observation(store, request, manual=False):
         # A source that cannot identify the proposal must not undo or reject
         # an explicit retained owner binding when its unchanged receipt recurs.
         row_key = found_key
-    if found is not None and (found != observation or found_key != row_key):
+    if found is not None and ((found != observation and not refresh) or found_key != row_key):
         raise Hold("evidence_conflict; preserve the original and obtain an explicit binding")
     if row_key is None:
         store["unresolved"][evidence_id] = observation
@@ -504,7 +532,15 @@ def bind(path, request):
 
 def resolve(row, field):
     """Resolve comparable source facts; never rank a missing source clock as latest."""
-    candidates = [v for v in row["facts"].values() if v["complete"] and v[field] is not None]
+    facts = list(row["facts"].values())
+    native = [v for v in facts if adapter_kind(row["identity"], v) == "sessionize"]
+    if native:
+        latest = max(instant(v["observed_at"]) for v in native)
+        native_ids = {v["evidence_id"] for v in native}
+        facts = [v for v in facts if v["evidence_id"] not in native_ids] + [
+            v for v in native if instant(v["observed_at"]) == latest
+        ]
+    candidates = [v for v in facts if v["complete"] and v[field] is not None]
     if field in {"dates", "city"}:
         # Mail/manual claims do not replace the event's own date/city source.
         candidates = [v for v in candidates if v["kind"] in {"event_official", "sessionize"}]
@@ -738,14 +774,29 @@ def sync(path, cfp_path):
             "results": [],
             "reason": "CFP state absent; initialize through its existing owner",
         }
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise Hold(
+            "cfp_damaged; restore the existing owner's supported UTF-8 JSON backup"
+        ) from error
     if not isinstance(state, dict):
         raise Hold("cfp_damaged; restore the existing owner object")
-    references = {}
+    references, reference_holds = {}, []
     for slug, prior in state.items():
         if slug.startswith("_") or not isinstance(prior, dict) or prior.get("cfp_url") is None:
             continue
         # Unknown retained CFP versions are still checked by reconcile before effects.
-        reference = url(prior["cfp_url"])
+        try:
+            reference = url(prior["cfp_url"])
+        except Hold:
+            reference_holds.append(
+                {
+                    "record_key_sha256": hashlib.sha256(
+                        slug.encode("utf-8", errors="backslashreplace")
+                    ).hexdigest(),
+                    "reason": "unusable_reference",
+                }
+            )
+            continue
         references.setdefault(reference, []).append(slug)
     results = []
     unresolved = bool(store["unresolved"])
@@ -781,6 +832,8 @@ def sync(path, cfp_path):
         "ledger_sha256": checked_hash,
         "current_ledger_sha256": current_hash,
         "generation_changed": current_hash != checked_hash,
+        "unusable_cfp_references": len(reference_holds),
+        "reference_holds": reference_holds,
     }
 
 
@@ -799,7 +852,14 @@ def main(argv=None):
         )
         if len(raw) > MAX_INPUT:
             raise Hold("input_capacity; split the actual observations without dropping evidence")
-        request = decode(raw)
+        try:
+            request = decode(raw)
+        except UnicodeDecodeError:
+            raise Hold("invalid_input_utf8; encode the documented JSON input as UTF-8") from None
+        except json.JSONDecodeError:
+            raise Hold(
+                "invalid_input_json; repair the documented JSON input before retrying"
+            ) from None
         if args.action == "import":
             from submission_sources import prepare
 
@@ -822,20 +882,20 @@ def main(argv=None):
                 "query_capacity; narrow the query or inspect unresolved source evidence; "
                 "no absence is established"
             )
-    except (
-        Hold,
-        SourceError,
-        OSError,
-        UnicodeDecodeError,
-        json.JSONDecodeError,
-        subprocess.TimeoutExpired,
-    ) as error:
-        message = (
-            str(error)
-            if isinstance(error, (Hold, SourceError))
-            else "source_io; preserve files and inspect owner access before retrying"
+    except (Hold, SourceError) as error:
+        print(f"cfp-submissions: {error}", file=sys.stderr)
+        return 1
+    except OSError:
+        print(
+            "cfp-submissions: source_io; preserve files and restore owner access/installation",
+            file=sys.stderr,
         )
-        print(f"cfp-submissions: {message}", file=sys.stderr)
+        return 1
+    except subprocess.TimeoutExpired:
+        print(
+            "cfp-submissions: cfp_owner_timeout; inspect the actual CFP result before retrying",
+            file=sys.stderr,
+        )
         return 1
     print(output)
     return 0

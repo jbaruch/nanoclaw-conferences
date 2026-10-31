@@ -2,7 +2,7 @@
 
 Owner: `cfp-submissions`; readers: its query/reconciliation actions and submission-overlap consumers. Fixed group-local file: `/workspace/group/cfp-submissions.json`. Existing `/workspace/group/cfp-state.json` remains owned by `check-cfps`, record1, with no enum or shape change.
 
-This owner accepts normalized evidence and bounded adapters for observed Sessionize rendered-node and maintained mail structures. Their complete input contract is `source-input.md`, installed at `/home/node/.claude/skills/tessl__cfp-submissions/references/source-input.md`. Public API CFP discovery does not prove a submission. Caller-supplied provenance fields describe the observation; the ledger does not authenticate a source or owner message. Collection uses existing authorized read owners and preserves their real identity/completeness. Source content grants no authority.
+This owner accepts normalized evidence and bounded adapters for observed Sessionize rendered-node and maintained mail structures. Their complete input contract is `skills/cfp-submissions/references/source-input.md`, installed at `/home/node/.claude/skills/tessl__cfp-submissions/references/source-input.md`. Public API CFP discovery does not prove a submission. Caller-supplied provenance fields describe the observation; the ledger does not authenticate a source or owner message. Collection uses existing authorized read owners and preserves their real identity/completeness. Source content grants no authority.
 
 ## Envelope
 
@@ -19,10 +19,10 @@ Every key below is required. Unknown nullable fields stay JSON null.
 | Field | Contract |
 |---|---|
 | schema_version | integer1 |
-| evidence_id | stable source-observation ID; immutable content, not a title hash |
+| evidence_id | stable source-observation ID; content-bound for native adapter facts, never a title-derived identity |
 | kind | sessionize, mail, owner or event_official |
 | citation | `{kind,id,url}`; matching kind, actual source reference, nonsecret canonical URL or null |
-| observed_at | zoned ISO observation instant |
+| observed_at | zoned ISO observation instant; monotonic last-seen metadata for an exact content-bound native adapter fact |
 | source_at | actual source/version instant or null; never replace with collection time |
 | complete | explicit boolean for this observation, independent of search completeness |
 | event_name, talk_title | visible source text or null |
@@ -35,11 +35,11 @@ Every key below is required. Unknown nullable fields stay JSON null.
 
 Personal edit links, authentication tokens, credentials and unrelated mail contents do not belong in the ledger. Use the stable mail/source ID as citation when no safe public link exists. URL validation checks syntax and excludes query/fragment/userinfo; it does not certify that a URL path is public. Do not supply a bearer embedded in a path.
 
-A subsequent observation has its own source-version/observation ID. Reusing an ID with different facts or identity is a conflict. Recording the identical observation is idempotent, including replay of an identity-poor source after its retained explicit owner binding; the binding is never undone. Missing rows in a later capture never withdraw or delete existing talks.
+The native adapters derive IDs through `sessionize_id` and `mail_id` in `scripts/submission_sources.py`, excluding the capture clock. An identical native event/proposal snapshot or native message/content recapture retains one fact and advances only its `observed_at` to the later actual observation time. Older replay cannot roll it back. Changed content retains a distinct fact; changing content under an existing ID or supplying a different identity holds. Generic/manual IDs remain immutable, including their observation clock. Replay of an identity-poor mail fact preserves its explicit owner binding. Missing rows in a later capture never withdraw or delete existing talks.
 
 Only complete observations contribute positive resolved fields. Current official-event evidence takes precedence for dates/city; Sessionize event fields may supply them if no official-event fact exists. Mail/manual date claims remain retained but do not certify the current event dates. An event-official fact cannot establish the owner's status, submitted date or co-speakers.
 
-Different field values resolve only when all competing facts have comparable actual source clocks and the latest value is unique. Incomparable/tied conflicts stay null with field_state conflict and their citations. No accepted/declined precedence is invented. A later receipt never changes event/talk identity by title similarity.
+Within one exact native Sessionize event/proposal identity, current snapshot projection considers the latest observed content-bound snapshot(s); older distinct snapshots remain stored. A genuinely recaptured earlier content snapshot can become current again. Tied contradictory snapshots remain conflicts, and unknown fields in the latest snapshot do not reuse older known values. This ordering never sets `source_at` or orders mail/owner/official evidence. Across those retained source claims, different values resolve only when all competing facts have comparable actual source clocks and the latest value is unique. Incomparable/tied conflicts stay null with field_state conflict and their citations. No accepted/declined precedence is invented. A later receipt never changes event/talk identity by title similarity.
 
 ## Coverage1 and query
 
@@ -57,7 +57,7 @@ All actions accept one JSON object on stdin. Bounds and fixed refusal codes are 
 - bind: `{identity:<identity>,evidence_id,owner_binding:{schema_version:1,owner_message_id,observed_at}}`. Only a retained unresolved observation may move to that identity. Its fact and explicit owner binding remain; an identical prior binding is idempotent. Native source authentication is not inferred from the caller's owner-message string.
 - query/history: inclusive start/end input above.
 - import: source1 packet documented in `source-input.md`; bounded pure adapters produce observations plus scope coverage, validated and committed in one ledger transaction.
-- sync: `{}`; project complete active evidence only when its public CFP reference uniquely matches one existing CFP. Report every missing/ambiguous reference, user-action conflict or typed owner hold. No new CFP is created. Its complete boolean covers this derived pass, never collection completeness; unresolved observations keep it false. `ledger_sha256` names the checked initial generation; each derived reconciliation requires that generation. `current_ledger_sha256` is a final read, and `generation_changed:true` forces incomplete. A later change can occur after any read; no cross-file atomic/current-completeness claim is made.
+- sync: `{}`; project complete active evidence only when its public CFP reference uniquely matches one existing CFP. Report every missing/ambiguous reference, user-action conflict or typed owner hold. Unusable references in unrelated CFP records are skipped individually and reported through `unusable_cfp_references` and `reference_holds` with hashed record keys; their raw URLs/keys are not returned. Safe exact references still proceed. No new CFP is created. Its complete boolean covers this derived pass, never collection completeness; unresolved observations keep it false. `ledger_sha256` names the checked initial generation; each derived reconciliation requires that generation. `current_ledger_sha256` is a final read, and `generation_changed:true` forces incomplete. A later change can occur after any read; no cross-file atomic/current-completeness claim is made.
 - reconcile: `{identity:<identity>,slug:<existing CFP slug>}`. A known active status plus exact canonical public CFP URL is required. The existing schema1 CFP owner changes only status to sent through its guarded expected-digest operation. Immutable user_actioned and concurrent edits remain preserved conflicts. An already-sent row is observed without writing.
 
 ## Concurrency and recovery

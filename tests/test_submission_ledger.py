@@ -685,3 +685,62 @@ def test_already_sent_still_requires_unambiguous_current_reference(
     with pytest.raises(ledger.Hold, match="cfp_identity"):
         ledger.reconcile(path, old, {"identity": observation["identity"], "slug": "event"})
     assert old.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    "unusable",
+    [
+        "https://example.invalid/cfp?year=2020",
+        "https://example.invalid/cfp#fragment",
+        "https://example.invalid:8443/cfp",
+        ["bad"],
+    ],
+)
+def test_unrelated_unusable_cfp_reference_is_reported_without_blocking_healthy_sync(
+    ledger, observation, cfp, tmp_path, unusable
+):
+    path, old = tmp_path / "ledger", tmp_path / "cfp.json"
+    ledger.record(path, observation)
+    state = {
+        "event": cfp,
+        "unrelated": {"schema_version": 1, "status": "open", "cfp_url": unusable},
+    }
+    write(old, state)
+    result = ledger.sync(path, old)
+    assert result["complete"] and result["unusable_cfp_references"] == 1
+    assert result["results"][0]["outcome"] == "sent"
+    state["event"]["status"] = "sent"
+    assert json.loads(old.read_text()) == state
+    assert str(unusable) not in json.dumps(result)
+
+
+@pytest.mark.parametrize(
+    "raw,code", [(b"\xff", "invalid_input_utf8"), (b"{DO-NOT-ECHO", "invalid_input_json")]
+)
+def test_cli_input_decode_diagnostic_names_the_actual_repair(
+    ledger, tmp_path, monkeypatch, capsys, raw, code
+):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(ledger, "LEDGER", tmp_path / "ledger")
+    monkeypatch.setattr("sys.stdin", SimpleNamespace(buffer=io.BytesIO(raw)))
+    assert ledger.main(["record"]) == 1
+    output = capsys.readouterr()
+    assert not output.out and code in output.err and "source_io" not in output.err
+    assert "DO-NOT-ECHO" not in output.err and not (tmp_path / "ledger").exists()
+
+
+@pytest.mark.parametrize("kind", ["sessionize", "owner"])
+def test_generic_and_manual_ids_remain_immutable_on_clock_changes(
+    ledger, observation, tmp_path, kind
+):
+    path = tmp_path / "ledger"
+    observation["fact"]["kind"] = kind
+    observation["fact"]["citation"]["kind"] = kind
+    ledger.record(path, observation)
+    before = path.read_bytes()
+    later = deepcopy(observation)
+    later["fact"]["observed_at"] = "2020-01-03T00:00:00Z"
+    with pytest.raises(ledger.Hold, match="evidence_conflict"):
+        ledger.record(path, later)
+    assert path.read_bytes() == before

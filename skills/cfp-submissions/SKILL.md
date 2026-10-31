@@ -25,7 +25,13 @@ skills/cfp-submissions/references/source-input.md
 
 ## Step 1 — Import collected evidence
 
-Use the normally installed Admin `ask-my-data` maintained search/full-body owners for mail, in genuine registered Main. Read the complete governing Admin Google-access contract before collection. Preserve the actual message IDs, bound `internalDate`, body completeness, query scope and continuation/omission/error facts. Never construct Main roles/env, read credentials, use direct Gmail HTTP or turn candidate search results into submission proof.
+Invoke the installed mail evidence owner in genuine registered Main:
+
+```text
+Skill(skill: "ask-my-data")
+```
+
+Request bounded read-only confirmation/decision collection for the requested source/window. Require the owner-produced schema1 evidence envelope, actual message IDs and bound `internalDate`, complete sanitized bodies, body completeness, query scope and continuation/omission/error facts described by source-input.md. A narrative answer or clipped evidence is not that handoff; preserve the gap and do not manufacture a packet. Read the complete governing Admin Google-access contract before collection. Never construct Main roles/env, read credentials, use direct Gmail HTTP or turn candidate search results into submission proof.
 
 For Sessionize, use the supported visible-browser read owner in actual Main for the existing signed-in `https://sessionize.com/app/speaker/events` page. Follow its installed Host browser contracts; do not bypass a held slot, navigate/edit/submit as a collection side effect, or read forms/values/storage/cookies. Capture the complete rendered-node tree, visible account/current filter, declared event/session counts, status labels and contained non-edit native event/session links. The adapter verifies the observed structure; it does not authenticate the supplied capture or establish complete history.
 

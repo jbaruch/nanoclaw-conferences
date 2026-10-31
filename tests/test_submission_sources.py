@@ -6,13 +6,15 @@ import io
 import json
 from collections import Counter
 from copy import deepcopy
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 
+from submission_fixture_builders import mail_packet, sessionize_packet
+
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "skills/cfp-submissions/scripts"
-FIXTURES = ROOT / "tests/fixtures/submissions"
 
 
 @pytest.fixture
@@ -29,12 +31,12 @@ def modules(monkeypatch):
 
 @pytest.fixture
 def dashboard():
-    return json.loads((FIXTURES / "sessionize-current.json").read_text())
+    return sessionize_packet()
 
 
 @pytest.fixture
 def mail():
-    return json.loads((FIXTURES / "mail-families.json").read_text())
+    return mail_packet()
 
 
 def test_observed_dashboard_relationships_and_full_owner_roundtrip(modules, dashboard, tmp_path):
@@ -69,7 +71,10 @@ def test_observed_dashboard_relationships_and_full_owner_roundtrip(modules, dash
     assert not current["coverage"]["complete"]
 
 
-@pytest.mark.parametrize("damage", ["account", "filter", "route", "tree", "version", "proposal"])
+@pytest.mark.parametrize(
+    "damage",
+    ["account", "filter", "route", "tree", "version", "proposal", "title", "scope", "extra"],
+)
 def test_unknown_dashboard_structure_refuses_without_mutation(modules, dashboard, tmp_path, damage):
     source, owner = modules
     nodes = dashboard["capture"]["nodes"]
@@ -85,10 +90,14 @@ def test_unknown_dashboard_structure_refuses_without_mutation(modules, dashboard
         nodes[10]["parent"] = 11
     elif damage == "version":
         dashboard["capture"]["schema_version"] = True
-    else:
+    elif damage == "proposal":
         next(n for n in nodes if "/app/speaker/session/" in n.get("href", ""))["href"] += (
             "?secret=example"
         )
+    elif damage in {"title", "scope"}:
+        dashboard["capture"].pop(damage)
+    else:
+        dashboard["capture"]["future"] = "unsupported"
     path = tmp_path / "ledger"
     with pytest.raises(source.SourceError):
         observations, scopes = source.prepare(dashboard)
@@ -353,3 +362,131 @@ def test_exact_own_form_date_clause_is_retained_without_guessing_city(modules, m
         and v["fact"]["city"] is None
         for v in own_forms
     )
+
+
+def test_unchanged_native_snapshots_over_a_hundred_recaptures_keep_one_fact(
+    modules, dashboard, tmp_path
+):
+    source, owner = modules
+    path = tmp_path / "ledger"
+    start = datetime(2020, 12, 1, tzinfo=UTC)
+    for capture_number in range(101):
+        dashboard["observed_at"] = (start + timedelta(seconds=capture_number)).isoformat()
+        observations, _ = source.prepare(dashboard)
+        owner.record(path, observations[0])
+    row = next(iter(owner.read(path)["rows"].values()))
+    assert len(row["facts"]) == 1
+    assert next(iter(row["facts"].values()))["observed_at"] == dashboard["observed_at"]
+    assert next(iter(row["facts"].values()))["source_at"] is None
+
+
+def test_native_status_cycle_and_older_replay_preserve_history_without_downgrade(
+    modules, dashboard, tmp_path
+):
+    source, owner = modules
+    path = tmp_path / "ledger"
+    badge = next(n for n in dashboard["capture"]["nodes"] if "session-status_0" in n["classes"])
+    first = source.prepare(dashboard)[0][0]
+    owner.record(path, first)
+    badge.update(classes="badge session-status_20", text="Declined")
+    dashboard["observed_at"] = "2020-12-02T00:00:00Z"
+    second = source.prepare(dashboard)[0][0]
+    owner.record(path, second)
+    query = {"start": "2020-01-01", "end": "2020-12-31"}
+    assert not owner.query(path, query)["matches"]
+    owner.record(path, first)
+    assert not owner.query(path, query)["matches"]
+    badge.update(classes="badge session-status_0", text="Accepted")
+    dashboard["observed_at"] = "2020-12-03T00:00:00Z"
+    third = source.prepare(dashboard)[0][0]
+    owner.record(path, third)
+    result = owner.query(path, query)
+    assert result["matches"][0]["fields"]["status"] == "accepted"
+    row = next(iter(owner.read(path)["rows"].values()))
+    assert len(row["facts"]) == 2
+    assert first["fact"]["evidence_id"] == third["fact"]["evidence_id"]
+    assert result["matches"][0]["checked_at"] == dashboard["observed_at"]
+
+
+def test_tied_native_snapshots_and_cross_source_conflicts_stay_unresolved(
+    modules, dashboard, tmp_path
+):
+    source, owner = modules
+    path = tmp_path / "ledger"
+    first = source.prepare(dashboard)[0][0]
+    owner.record(path, first)
+    badge = next(n for n in dashboard["capture"]["nodes"] if "session-status_0" in n["classes"])
+    badge.update(classes="badge session-status_20", text="Declined")
+    owner.record(path, source.prepare(dashboard)[0][0])
+    query = {"start": "2020-01-01", "end": "2020-12-31"}
+    assert owner.query(path, query)["unresolved"][0]["field_state"]["status"] == "conflict"
+    badge.update(classes="badge session-status_0", text="Accepted")
+    dashboard["observed_at"] = "2020-12-02T00:00:00Z"
+    owner.record(path, source.prepare(dashboard)[0][0])
+    mail_claim = deepcopy(first)
+    mail_claim["fact"].update(
+        evidence_id="immutable-mail-decision",
+        kind="mail",
+        status="declined",
+        source_at="2020-11-30T00:00:00Z",
+        citation={"kind": "mail", "id": "native-mail-id", "url": None},
+    )
+    owner.record(path, mail_claim)
+    result = owner.query(path, query)
+    assert result["unresolved"][0]["field_state"]["status"] == "conflict"
+    assert any(
+        c["citation"]["kind"] == "mail" for c in result["unresolved"][0]["citations"]["status"]
+    )
+
+
+def test_new_unknown_native_status_does_not_reuse_an_old_known_status(modules, dashboard, tmp_path):
+    source, owner = modules
+    path = tmp_path / "ledger"
+    owner.record(path, source.prepare(dashboard)[0][0])
+    dashboard["observed_at"] = "2020-12-02T00:00:00Z"
+    badge = next(n for n in dashboard["capture"]["nodes"] if "session-status_0" in n["classes"])
+    badge.update(classes="badge session-status_999", text="Unknown label")
+    owner.record(path, source.prepare(dashboard)[0][0])
+    result = owner.query(path, {"start": "2020-01-01", "end": "2020-12-31"})
+    assert not result["matches"] and result["unresolved"][0]["fields"]["status"] is None
+
+
+def test_unchanged_mail_recaptures_refresh_only_observation_metadata_and_binding(
+    modules, mail, tmp_path
+):
+    source, owner = modules
+    path = tmp_path / "ledger"
+    capture = deepcopy(mail["collections"][-1])
+    capture["evidence"]["threads"] = [capture["evidence"]["threads"][1]]
+    packet = {"schema_version": 1, "source": "mail", "collections": [capture]}
+    first = source.prepare(packet)[0][0]
+    owner.record(path, first)
+    identity = {
+        "event": {"namespace": "owner", "id": "explicit-event"},
+        "talk": {"namespace": "owner", "id": "explicit-talk"},
+    }
+    binding = {
+        "schema_version": 1,
+        "owner_message_id": "owner-note-2",
+        "observed_at": "2020-12-01T00:00:00Z",
+    }
+    owner.bind(
+        path,
+        {
+            "identity": identity,
+            "evidence_id": first["fact"]["evidence_id"],
+            "owner_binding": binding,
+        },
+    )
+    capture["observed_at"] = "2020-12-03T00:00:00Z"
+    later = source.prepare(packet)[0][0]
+    assert later["fact"]["evidence_id"] == first["fact"]["evidence_id"]
+    owner.record(path, later)
+    owner.record(path, first)  # An older replay cannot regress the last observed clock.
+    row = owner.read(path)["rows"][owner.key(identity)]
+    assert len(row["facts"]) == 1 and row["owner_bindings"] == {
+        first["fact"]["evidence_id"]: binding
+    }
+    retained = next(iter(row["facts"].values()))
+    assert retained["observed_at"] == capture["observed_at"]
+    assert retained["source_at"] == first["fact"]["source_at"]

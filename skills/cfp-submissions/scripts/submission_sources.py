@@ -70,9 +70,17 @@ def list_value(value, code) -> list:
 
 
 def sha(value):
-    return hashlib.sha256(
-        json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False).encode()
-    ).hexdigest()
+    try:
+        return hashlib.sha256(
+            json.dumps(value, sort_keys=True, ensure_ascii=False, allow_nan=False).encode()
+        ).hexdigest()
+    except (UnicodeEncodeError, ValueError) as error:
+        raise SourceError("source_encoding; supply finite UTF-8 source data") from error
+
+
+def material(fact):
+    """Immutable claim content; adapter last-seen metadata is not a source clock."""
+    return {key: value for key, value in fact.items() if key not in {"evidence_id", "observed_at"}}
 
 
 def new_fact(kind, identifier, observed_at, **fields):
@@ -186,10 +194,70 @@ def native_path(value, pattern):
         return None
 
 
+def sessionize_id(identity, fact):
+    if (
+        not isinstance(identity, dict)
+        or fact.get("kind") != "sessionize"
+        or fact.get("source_at") is not None
+    ):
+        return None
+    event, talk = identity.get("event"), identity.get("talk")
+    if not isinstance(event, dict) or not isinstance(talk, dict):
+        return None
+    if event.get("namespace") != "sessionize" or talk.get("namespace") != "sessionize":
+        return None
+    event_id, proposal = event.get("id"), talk.get("id")
+    if not isinstance(event_id, str) or not re.fullmatch(r"\d+", event_id):
+        return None
+    citation = fact.get("citation")
+    if (
+        not isinstance(citation, dict)
+        or citation.get("kind") != "sessionize"
+        or citation.get("id") != proposal
+    ):
+        return None
+    if native_path(citation.get("url"), r"/app/speaker/session/([A-Za-z0-9_-]{1,100})") != proposal:
+        return None
+    return f"sessionize:{event_id}:{proposal}:{sha([identity, material(fact)])}"
+
+
+def mail_id(fingerprint, fact):
+    return f"mail:{fact['citation']['id']}:{fingerprint}:{sha(material(fact))}"
+
+
+def adapter_kind(identity, fact):
+    """Recognize an exact content-bound adapter ID, never actor/source authentication."""
+    identifier = fact.get("evidence_id")
+    if sessionize_id(identity, fact) == identifier and identifier is not None:
+        return "sessionize"
+    if fact.get("kind") == "mail" and isinstance(identifier, str):
+        match = re.fullmatch(r"mail:([A-Za-z0-9_-]{1,100}):([a-f0-9]{64}):[a-f0-9]{64}", identifier)
+        citation = fact.get("citation")
+        if (
+            match
+            and isinstance(citation, dict)
+            and citation.get("kind") == "mail"
+            and citation.get("id") == match[1]
+            and citation.get("url") is None
+            and mail_id(match[2], fact) == identifier
+        ):
+            return "mail"
+    return None
+
+
 def sessionize(request):
     """Return observations and scope coverage from the actual rendered tree."""
     require(set(request) == {"schema_version", "source", "observed_at", "capture"}, "capture_shape")
     capture = request["capture"]
+    require(
+        isinstance(capture, dict)
+        and set(capture) == {"schema_version", "origin", "path", "title", "nodes", "scope"},
+        "capture_shape",
+    )
+    require(
+        bounded(capture["title"], 300).strip() and bounded(capture["scope"]).strip(),
+        "capture_provenance",
+    )
     require(
         isinstance(capture, dict)
         and type(capture.get("schema_version")) is int
@@ -335,7 +403,11 @@ def sessionize(request):
             dates=current["dates"],
         )
         fact["citation"] = {"kind": "sessionize", "id": proposal, "url": node["href"]}
-        fact["evidence_id"] = f"sessionize:{current['event_id']}:{proposal}:{sha(fact)}"
+        identity = {
+            "event": {"namespace": "sessionize", "id": pair[0]},
+            "talk": {"namespace": "sessionize", "id": pair[1]},
+        }
+        fact["evidence_id"] = sessionize_id(identity, fact)
         observations.append(
             {
                 "identity": {
@@ -381,13 +453,14 @@ def mail_text(body):
 def mail_fields(family, subject, body):
     """Only actual observed structural templates establish positive claims."""
     result = {}
-    if family in {"pretalx", "devopsdays"} and subject.startswith("Your proposal: "):
+    # Query families describe coverage, not which claim a fixed template means.
+    if subject.startswith("Your proposal: "):
         match = re.search(
             r"We have received your proposal [“\"](.+?)[”\"] to (.+?)\. We will notify you", body
         )
         if match and subject.removeprefix("Your proposal: ") == match[1]:
             result.update(talk_title=match[1], event_name=match[2], status="submitted")
-    elif family == "devopsdays":
+    elif " We received your proposal: " in subject:
         match = re.search(
             r'Thank you for submitting "(.+?)" to (.+?)\. You can view, edit, or withdraw', body
         )
@@ -398,7 +471,7 @@ def mail_fields(family, subject, body):
                 status="submitted",
                 dates=own_form_claim(match[2]),
             )
-    elif family == "oxford":
+    elif "Thank you for submitting your proposal" in subject:
         match = re.search(
             r"Thank you for submitting your proposal to speak at (.+?) ,?\s*from (.+?)\. "
             r"We will review completed proposals",
@@ -410,13 +483,13 @@ def mail_fields(family, subject, body):
             and "Oxford Abstracts" in body
         ):
             result.update(event_name=match[1], status="submitted", **oxford_claim(match[2]))
-    elif family == "sessionize-sessions" and subject.startswith("Your sessions at "):
+    elif subject.startswith("Your sessions at "):
         if (
             "following sessions have not been accepted for " in body
             or "unable to include your session(s) in the final program of " in body
         ):
             result.update(event_name=subject.removeprefix("Your sessions at "), status="declined")
-    elif family == "cfpdev-proposal":
+    elif re.match(r"\[[A-Za-z0-9_-]+\] Your proposal ", subject):
         refused = re.fullmatch(r"\[[A-Za-z0-9_-]+\] Your proposal has been refused : (.+)", subject)
         accepted = re.fullmatch(
             r"\[[A-Za-z0-9_-]+\] Your proposal has been accepted : (.+)", subject
@@ -535,13 +608,14 @@ def mail(request):
     for identifier, item in sorted(seen.items()):
         fact = new_fact(
             "mail",
-            f"mail:{identifier}:{sha([item['fingerprint'], item['observed_at'], item['fields']])}",
+            "pending",
             item["observed_at"],
             source_at=item["source_at"],
             complete=item["complete"],
             **item["fields"],
         )
         fact["citation"] = {"kind": "mail", "id": identifier, "url": None}
+        fact["evidence_id"] = mail_id(item["fingerprint"], fact)
         observations.append({"identity": None, "fact": fact})
     return observations, scopes
 
