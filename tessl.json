@@ -13,6 +13,9 @@
     },
     "jbaruch/blog-writer": {
       "version": "latest"
+    },
+    "jbaruch/nanoclaw-host": {
+      "version": "latest"
     }
   }
 }
