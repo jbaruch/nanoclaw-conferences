@@ -36,6 +36,7 @@ MAX_CLAIM_TEXT = 300
 MAX_MAIL_WRAPPER_BYTES = 512 * 1024
 MAX_MAIL_SEARCH_BYTES = 64 * 1024
 MAX_MAIL_READS = 50
+MAX_MAIL_THREADS = 30
 MAIL_READ_ERRORS = {
     "binding_changed",
     "body_unavailable",
@@ -704,7 +705,8 @@ def mail_search(search):
             "mail_search_error",
         )
     threads = list_value(search["threads"], "mail_threads")
-    require(len(threads) <= 30, "mail_threads")  # Published three pages of at most ten stubs.
+    # Retained and dropped threads share the published three-page stub budget.
+    require(len(threads) + search["threads_omitted"] <= MAX_MAIL_THREADS, "mail_threads")
     originals, pending, tids = {}, {}, set()
     gap = bool(errors or search["threads_omitted"] or search["next_page_token"])
     for thread in threads:

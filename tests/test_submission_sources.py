@@ -1299,3 +1299,29 @@ def test_latest_omitted_mail_ids_keep_global_native_thread_binding(
             collection["evidence"] = collection["evidence"]["search"]
     with pytest.raises(source.SourceError, match="mail_identity_conflict"):
         source.prepare(packet)
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize("retained", [0, 1])
+@pytest.mark.parametrize("excess", [0, 1])
+def test_search_retained_and_omitted_threads_share_the_native_page_budget(
+    modules, source_version, retained, excess
+):
+    source, _ = modules
+    packet = hydrated_mail(missing=True)
+    wrapper = packet["collections"][0]["evidence"]
+    search = wrapper["search"]
+    search["threads_omitted"] = 30 - retained + excess
+    if not retained:
+        search["threads"] = []
+        wrapper["body_reads_omitted"] = 0
+        wrapper["errors"] = []
+    packet["schema_version"] = source_version
+    if source_version == 1:
+        packet["collections"][0]["evidence"] = search
+    if excess:
+        with pytest.raises(source.SourceError, match="mail_threads"):
+            source.prepare(packet)
+    else:
+        observations, scopes = source.prepare(packet)
+        assert len(observations) == retained and not scopes[0]["complete"]
