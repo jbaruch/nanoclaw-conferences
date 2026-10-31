@@ -1325,3 +1325,26 @@ def test_search_retained_and_omitted_threads_share_the_native_page_budget(
     else:
         observations, scopes = source.prepare(packet)
         assert len(observations) == retained and not scopes[0]["complete"]
+
+
+@pytest.mark.parametrize("surface", ["events", "sessions"])
+def test_oversized_rendered_count_has_actionable_atomic_cli_refusal(
+    modules, dashboard, tmp_path, monkeypatch, capsys, surface
+):
+    source, owner = modules
+    nodes = dashboard["capture"]["nodes"]
+    if surface == "events":
+        target = next(node for node in nodes if node["tag"] == "SMALL" and node["text"] == "(16)")
+        target["text"] = "(" + "9" * 5000 + ")"
+    else:
+        target = next(node for node in nodes if node["text"].endswith(" submitted"))
+        target["text"] = "9" * 5000 + " submitted"
+    with pytest.raises(source.SourceError, match="capture_count"):
+        source.prepare(dashboard)
+    ledger_path = tmp_path / "ledger"
+    monkeypatch.setattr(owner, "LEDGER", ledger_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(dashboard)))
+    assert owner.main(["import"]) == 1
+    output = capsys.readouterr()
+    assert not output.out and "capture_count" in output.err and "Traceback" not in output.err
+    assert not ledger_path.exists()

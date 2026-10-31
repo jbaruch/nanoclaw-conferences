@@ -324,6 +324,15 @@ def adapter_kind(identity, fact):
     return None
 
 
+def rendered_count(value):
+    try:
+        return int(value)
+    except ValueError as error:
+        raise SourceError(
+            "capture_count; retain the capture and inspect its unsupported rendered count"
+        ) from error
+
+
 def sessionize(request):
     """Return observations and scope coverage from the actual rendered tree."""
     require(set(request) == {"schema_version", "source", "observed_at", "capture"}, "capture_shape")
@@ -394,7 +403,7 @@ def sessionize(request):
     require(len(active) == 1 and len(headings) == 1, "capture_filter")
     counts = [nodes[j]["text"] for j in children[headings[0]] if nodes[j]["tag"] == "SMALL"]
     require(len(counts) == 1 and re.fullmatch(r"\(\d+\)", counts[0]), "capture_count")
-    declared = int(counts[0][1:-1])
+    declared = rendered_count(counts[0][1:-1])
     tables = [i for i, n in enumerate(nodes) if n["tag"] == "TBODY"]
     require(len(tables) == 1, "capture_table")
     rows = children[tables[0]]
@@ -435,7 +444,7 @@ def sessionize(request):
                 if re.fullmatch(r"(?:\d+/)?\d+ (?:submitted|accepted)", nodes[i]["text"])
             ]
             require(len(summaries) == 1, "capture_session_count")
-            count = int(summaries[0].split()[0].split("/")[-1])
+            count = rendered_count(summaries[0].split()[0].split("/")[-1])
             current = {
                 "event_id": event_id,
                 "event_name": node["text"] or None,
