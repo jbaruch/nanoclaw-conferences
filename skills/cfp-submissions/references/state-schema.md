@@ -51,7 +51,7 @@ Projection fields each carry known/unknown/conflict state and provenance with so
 
 ## CLI actions
 
-All actions accept one JSON object on stdin. Bounds and fixed refusal codes are owned by `scripts/submissions.py` constants/validators; oversized output holds instead of silently dropping evidence. Success exits0 with JSON. Supported no-effect holds and expected I/O failures exit1 with an actionable stderr diagnostic. Unexpected implementation faults propagate. No action makes a network call.
+All actions accept one JSON object on stdin. Bounds and fixed refusal codes are owned by `scripts/submissions.py` constants/validators; oversized output holds instead of silently dropping evidence. Sync admits its complete conservative result budget before any CFP owner invocation; a capacity refusal leaves CFP bytes unchanged and directs the caller to existing per-identity reconcile actions. Success exits0 with JSON. Supported no-effect holds and expected I/O failures exit1 with an actionable stderr diagnostic. Unexpected implementation faults propagate; inspect existing owner results before retrying an uncertain derived operation. No action makes a network call.
 
 - record/manual: `{identity:<identity>|null,fact:<fact1>,coverage?:<coverage1>}`. Manual requires owner-kind evidence/citation. Result reports recorded/changed/identity_resolved and retained ledger hash.
 - bind: `{identity:<identity>,evidence_id,owner_binding:{schema_version:1,owner_message_id,observed_at}}`. Only a retained unresolved observation may move to that identity. Its fact and explicit owner binding remain; an identical prior binding is idempotent. Native source authentication is not inferred from the caller's owner-message string.

@@ -4,6 +4,16 @@ These adapters make no network calls and authenticate no caller or source.
 Sessionize input is the rendered-node capture documented beside the skill.
 Mail input is the unchanged Admin search-mail schema1 envelope with complete
 body reads and their bound message dates. Unknown templates remain unresolved.
+
+Callable contract: prepare(request) accepts one decoded source1 dict with source
+sessionize or mail, as defined in references/source-input.md. It returns the
+tuple (observations, scopes): fresh lists of identity/fact observations for the
+ledger owner and coverage1 records describing checked scopes and retained gaps.
+Unknown templates or missing identities remain unresolved observations; they do
+not establish absence. Malformed, unsupported, oversized or contradictory input
+raises SourceError with a bounded recovery diagnostic before any caller commit.
+Unexpected implementation errors propagate. This module performs no filesystem,
+network, subprocess, ledger or CFP I/O and does not authenticate caller evidence.
 """
 
 from __future__ import annotations
@@ -18,6 +28,7 @@ from urllib.parse import urlsplit
 MAX_NODES = 20000
 MAX_MESSAGES = 1000
 MAX_BODY = 256 * 1024
+MAIL_ID = re.compile(r"[A-Fa-f0-9]{1,128}")
 STATUS = {
     ("session-status_0", "Accepted"): "accepted",
     ("session-status_2", "Waitlisted"): "waitlisted",
@@ -231,7 +242,9 @@ def adapter_kind(identity, fact):
     if sessionize_id(identity, fact) == identifier and identifier is not None:
         return "sessionize"
     if fact.get("kind") == "mail" and isinstance(identifier, str):
-        match = re.fullmatch(r"mail:([A-Za-z0-9_-]{1,100}):([a-f0-9]{64}):[a-f0-9]{64}", identifier)
+        match = re.fullmatch(
+            rf"mail:({MAIL_ID.pattern}):([a-f0-9]{{64}}):[a-f0-9]{{64}}", identifier
+        )
         citation = fact.get("citation")
         if (
             match
@@ -571,8 +584,8 @@ def mail(request):
             for message in thread["messages"]:
                 count += 1
                 require(count <= MAX_MESSAGES and isinstance(message, dict), "mail_message_bounds")
-                identifier = bounded(message.get("messageId"), 100)
-                require(re.fullmatch(r"[A-Za-z0-9_-]{1,100}", identifier), "mail_message_identity")
+                identifier = bounded(message.get("messageId"), 128)
+                require(MAIL_ID.fullmatch(identifier), "mail_message_identity")
                 subject = bounded(message.get("subject"), 2000)
                 source_at = bounded(message.get("internalDate"), 40)
                 require(type(message.get("body_complete")) is bool, "mail_body_coverage")

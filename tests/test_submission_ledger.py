@@ -744,3 +744,199 @@ def test_generic_and_manual_ids_remain_immutable_on_clock_changes(
     with pytest.raises(ledger.Hold, match="evidence_conflict"):
         ledger.record(path, later)
     assert path.read_bytes() == before
+
+
+@pytest.fixture(params=["integer", "depth"])
+def decoder_failure_bytes(request):
+    import sys
+
+    prior_digits = sys.get_int_max_str_digits()
+    prior_depth = sys.getrecursionlimit()
+    sys.set_int_max_str_digits(640)
+    sys.setrecursionlimit(1000)
+    try:
+        yield (
+            b'{"n":'
+            + (b"9" * 5000 if request.param == "integer" else b"[" * 2000 + b"0" + b"]" * 2000)
+            + b"}"
+        )
+    finally:
+        sys.set_int_max_str_digits(prior_digits)
+        sys.setrecursionlimit(prior_depth)
+
+
+def test_decoder_input_driven_failures_have_input_hold(
+    ledger, decoder_failure_bytes, tmp_path, monkeypatch, capsys
+):
+    from types import SimpleNamespace
+
+    path = tmp_path / "ledger"
+    monkeypatch.setattr(ledger, "LEDGER", path)
+    monkeypatch.setattr("sys.stdin", SimpleNamespace(buffer=io.BytesIO(decoder_failure_bytes)))
+    assert ledger.main(["record"]) == 1
+    output = capsys.readouterr()
+    assert not output.out and "invalid_input_json" in output.err
+    assert "Traceback" not in output.err and not path.exists()
+
+
+@pytest.mark.parametrize("boundary", ["ledger", "reconcile_cfp", "sync_cfp"])
+def test_decoder_retained_failures_hold_bytes_unchanged(
+    ledger, observation, decoder_failure_bytes, tmp_path, boundary
+):
+    path, cfp_path = tmp_path / "ledger", tmp_path / "cfp"
+    if boundary == "ledger":
+        path.write_bytes(decoder_failure_bytes)
+        path.chmod(0o600)
+        with pytest.raises(ledger.Hold, match="damaged_ledger"):
+            ledger.read(path)
+        assert path.read_bytes() == decoder_failure_bytes
+    else:
+        ledger.record(path, observation)
+        before = path.read_bytes()
+        cfp_path.write_bytes(decoder_failure_bytes)
+        cfp_path.chmod(0o640)
+        with pytest.raises(ledger.Hold, match="cfp_damaged"):
+            if boundary == "reconcile_cfp":
+                ledger.reconcile(
+                    path, cfp_path, {"identity": observation["identity"], "slug": "event"}
+                )
+            else:
+                ledger.sync(path, cfp_path)
+        assert path.read_bytes() == before and cfp_path.read_bytes() == decoder_failure_bytes
+
+
+def test_decoder_owner_result_failure_has_owner_hold(ledger, decoder_failure_bytes, monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        ledger.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(
+            returncode=0, stdout=decoder_failure_bytes.decode()
+        ),
+    )
+    with pytest.raises(ledger.Hold, match="cfp_owner_result"):
+        ledger.owner_call(Path("unused-owner"), [], {})
+
+
+def test_absent_cfp_sync_reports_checked_and_final_generations(ledger, observation, tmp_path):
+    path, cfp_path = tmp_path / "ledger", tmp_path / "absent-cfp"
+    first = ledger.record(path, observation)
+    result = ledger.sync(path, cfp_path)
+    assert not result["complete"] and result["results"] == []
+    assert result["ledger_sha256"] == result["current_ledger_sha256"] == first["ledger_sha256"]
+    assert result["generation_changed"] is False
+    assert result["unusable_cfp_references"] == 0 and result["reference_holds"] == []
+    assert not cfp_path.exists()
+
+
+def test_absent_cfp_sync_final_read_reports_concurrent_ledger_change(
+    ledger, observation, tmp_path, monkeypatch
+):
+    path, cfp_path = tmp_path / "ledger", tmp_path / "absent-cfp"
+    first = ledger.record(path, observation)
+    original = ledger.file_bytes
+
+    def disappear(selected, private=True):
+        if selected == cfp_path:
+            added = deepcopy(observation)
+            added["identity"] = None
+            added["fact"]["evidence_id"] = "new-unknown-source"
+            ledger.record(path, added)
+            raise FileNotFoundError
+        return original(selected, private=private)
+
+    monkeypatch.setattr(ledger, "file_bytes", disappear)
+    result = ledger.sync(path, cfp_path)
+    assert result["ledger_sha256"] == first["ledger_sha256"]
+    assert result["current_ledger_sha256"] == ledger.digest(ledger.read(path))
+    assert result["generation_changed"] and not result["complete"]
+    assert not cfp_path.exists()
+
+
+def test_sync_capacity_admits_result_before_real_guarded_owner_effects(
+    ledger, observation, cfp, tmp_path, monkeypatch, capsys
+):
+    path, cfp_path = tmp_path / "ledger", tmp_path / "cfp"
+    observations = []
+    for index in range(180):
+        item = deepcopy(observation)
+        item["identity"]["event"]["id"] = f"{index:04d}" + "界" * 296
+        item["identity"]["talk"]["id"] = "讲" * 300
+        item["fact"]["evidence_id"] = f"source-{index}"
+        if index:
+            item["fact"]["cfp_url"] = None
+        observations.append(item)
+    ledger.record_many(path, observations, [])
+    write(cfp_path, {"event": cfp}, mode=0o640)
+    ledger_before, cfp_before = path.read_bytes(), cfp_path.read_bytes()
+    calls = []
+    original = ledger.owner_call
+
+    def observed_call(owner, arguments, value):
+        calls.append(arguments)
+        return original(owner, arguments, value)
+
+    monkeypatch.setattr(ledger, "owner_call", observed_call)
+    monkeypatch.setattr(ledger, "LEDGER", path)
+    monkeypatch.setattr(ledger, "CFP_STATE", cfp_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO("{}"))
+    assert ledger.main(["sync"]) == 1
+    output = capsys.readouterr()
+    assert cfp_path.read_bytes() == cfp_before and path.read_bytes() == ledger_before
+    assert calls == [] and not output.out and "sync_capacity" in output.err
+
+
+def test_small_sync_cli_retains_real_owner_effect_and_complete_result(
+    ledger, observation, cfp, tmp_path, monkeypatch, capsys
+):
+    path, cfp_path = tmp_path / "ledger", tmp_path / "cfp"
+    ledger.record(path, observation)
+    before = path.read_bytes()
+    write(cfp_path, {"event": cfp}, mode=0o640)
+    monkeypatch.setattr(ledger, "LEDGER", path)
+    monkeypatch.setattr(ledger, "CFP_STATE", cfp_path)
+    monkeypatch.setattr("sys.stdin", io.StringIO("{}"))
+    assert ledger.main(["sync"]) == 0
+    output = capsys.readouterr()
+    result = json.loads(output.out)
+    assert not output.err and result["complete"]
+    assert result["results"][0]["outcome"] == "sent"
+    assert json.loads(cfp_path.read_text())["event"]["status"] == "sent"
+    assert path.read_bytes() == before and not result["generation_changed"]
+
+
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {"written": True},
+        {"written": 2},
+        {"skipped_user_actioned": "0"},
+        {"total_records": -1},
+        {"skipped_changed": ["another-slug"]},
+    ],
+)
+def test_single_slug_owner_result_contract_refuses_malformed_counts(
+    ledger, observation, cfp, tmp_path, monkeypatch, invalid
+):
+    path, cfp_path = tmp_path / "ledger", tmp_path / "cfp"
+    ledger.record(path, observation)
+    write(cfp_path, {"event": cfp})
+    before = cfp_path.read_bytes()
+    original = ledger.owner_call
+
+    def owner_reply(owner, arguments, value):
+        if arguments == ["--snapshot"]:
+            return original(owner, arguments, value)
+        return {
+            "written": 0,
+            "skipped_user_actioned": 0,
+            "total_records": 1,
+            "skipped_changed": [],
+            **invalid,
+        }
+
+    monkeypatch.setattr(ledger, "owner_call", owner_reply)
+    with pytest.raises(ledger.Hold, match="cfp_owner_result"):
+        ledger.reconcile(path, cfp_path, {"identity": observation["identity"], "slug": "event"})
+    assert cfp_path.read_bytes() == before

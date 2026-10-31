@@ -199,7 +199,7 @@ def test_incomplete_body_cannot_assert_submission_and_changed_duplicate_holds(mo
     duplicate = mail["collections"][5]["evidence"]["threads"][0]["messages"][0]
     duplicate["body_complete"] = False
     observations, scopes = source.prepare(mail)
-    receipt = next(v for v in observations if v["fact"]["citation"]["id"] == "example-pretalx")
+    receipt = next(v for v in observations if v["fact"]["citation"]["id"] == "a004")
     assert not receipt["fact"]["complete"]
     assert any("message body incomplete" in s["gaps"] for s in scopes)
 
@@ -490,3 +490,35 @@ def test_unchanged_mail_recaptures_refresh_only_observation_metadata_and_binding
     retained = next(iter(row["facts"].values()))
     assert retained["observed_at"] == capture["observed_at"]
     assert retained["source_at"] == first["fact"]["source_at"]
+
+
+@pytest.mark.parametrize("identifier", ["f", "A" * 101, "B" * 128])
+def test_maintained_mail_id_bounds_and_long_id_recapture(modules, mail, tmp_path, identifier):
+    source, owner = modules
+    collection = deepcopy(mail["collections"][-1])
+    collection["evidence"].update(
+        threads=collection["evidence"]["threads"][:1], complete=False, threads_omitted=2
+    )
+    collection["evidence"]["threads"][0]["messages"][0]["messageId"] = identifier
+    packet = {"schema_version": 1, "source": "mail", "collections": [collection]}
+    observations, scopes = source.prepare(packet)
+    assert observations[0]["fact"]["citation"]["id"] == identifier
+    assert source.adapter_kind(None, observations[0]["fact"]) == "mail"
+    path = tmp_path / "ledger"
+    owner.record_many(path, observations, scopes)
+    collection["observed_at"] = "2020-12-03T00:00:00Z"
+    observations, scopes = source.prepare(packet)
+    assert owner.record_many(path, observations, scopes)["changed"]
+    assert len(owner.read(path)["unresolved"]) == 1
+
+
+@pytest.mark.parametrize("identifier", ["g", "a_b", "", "a" * 129])
+def test_rejects_nonproducer_mail_ids(modules, mail, identifier):
+    source, _ = modules
+    collection = deepcopy(mail["collections"][-1])
+    collection["evidence"].update(
+        threads=collection["evidence"]["threads"][:1], complete=False, threads_omitted=2
+    )
+    collection["evidence"]["threads"][0]["messages"][0]["messageId"] = identifier
+    with pytest.raises(source.SourceError):
+        source.prepare({"schema_version": 1, "source": "mail", "collections": [collection]})

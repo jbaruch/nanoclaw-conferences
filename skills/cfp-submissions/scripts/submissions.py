@@ -14,7 +14,10 @@ import: source1 Sessionize rendered-tree or maintained mail packet; all
 reconcile: {identity: <identity>, slug: <existing exact CFP slug>}.
 sync: {}. Derived exact-reference CFP pass; reports each outcome, checked and
       final ledger hashes, generation_changed and complete (not collection
-      completeness). Both derived actions use the existing guarded CFP owner.
+      completeness), including absent CFP state. The complete supported result
+      budget is admitted before any guarded CFP owner invocation. A batch that
+      cannot fit holds without effects; use per-identity reconcile instead.
+      Both derived actions use the existing guarded CFP owner.
 record/manual return recorded/changed/identity_resolved/ledger_sha256;
 bind returns bound/changed/ledger_sha256; query/history return matches,
 unresolved, coverage and an initialized ledger's canonical hash.
@@ -56,6 +59,10 @@ OWNER = Path("/home/node/.claude/skills/tessl__check-cfps/scripts/commit-state.p
 MAX_BYTES = 16 * 1024 * 1024
 MAX_INPUT = 2 * 1024 * 1024
 MAX_OUTPUT = 256 * 1024
+# Extra serialized bytes beyond identity for the finite single-slug owner result
+# or fixed controlled recovery. Unsupported larger outcomes are programmer faults,
+# never a query-capacity/no-effect hold after a guarded write.
+MAX_SYNC_OUTCOME = 4096
 MAX_ROWS = 5000
 MAX_IMPORT = 5000
 MAX_FACTS = 100
@@ -350,7 +357,16 @@ def decode(raw):
             result[name] = value
         return result
 
-    return json.loads(raw, object_pairs_hook=pairs)
+    try:
+        return json.loads(raw, object_pairs_hook=pairs)
+    except (Hold, UnicodeDecodeError):
+        raise
+    except (ValueError, RecursionError) as error:
+        raise json.JSONDecodeError("invalid bounded JSON input", "", 0) from error
+
+
+def result_text(value):
+    return json.dumps(value, ensure_ascii=False, allow_nan=False)
 
 
 @contextmanager
@@ -655,7 +671,7 @@ def owner_call(owner, arguments, value):
     if completed.returncode:
         raise Hold("cfp_owner_hold; retain the ledger; inspect the supported CFP owner backup")
     try:
-        result = json.loads(completed.stdout)
+        result = decode(completed.stdout)
     except json.JSONDecodeError as error:
         raise Hold("cfp_owner_result; inspect owner installation before reconciliation") from error
     if not isinstance(result, dict):
@@ -744,7 +760,14 @@ def reconcile(path, cfp_path, request, expected_ledger_sha256=None):
             {request["slug"]: proposed},
         )
     expected_keys = {"written", "skipped_user_actioned", "total_records", "skipped_changed"}
-    if set(response) != expected_keys or type(response["written"]) is not int:
+    if (
+        set(response) != expected_keys
+        or any(type(response[name]) is not int for name in expected_keys - {"skipped_changed"})
+        or not 0 <= response["written"] <= 1
+        or not 0 <= response["skipped_user_actioned"] <= 1
+        or not 0 <= response["total_records"] <= sys.maxsize
+        or response["skipped_changed"] not in ([], [request["slug"]])
+    ):
         raise Hold("cfp_owner_result; inspect the existing owner result; do not replay blindly")
     outcome = "sent" if response["written"] == 1 else "conflict"
     return {
@@ -768,11 +791,18 @@ def sync(path, cfp_path):
     try:
         state = decode(file_bytes(cfp_path, private=False))
     except FileNotFoundError:
+        current = read(path)
+        current_hash = digest(current) if current is not None else None
         return {
             "schema_version": 1,
             "complete": False,
             "results": [],
             "reason": "CFP state absent; initialize through its existing owner",
+            "ledger_sha256": checked_hash,
+            "current_ledger_sha256": current_hash,
+            "generation_changed": current_hash != checked_hash,
+            "unusable_cfp_references": 0,
+            "reference_holds": [],
         }
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         raise Hold(
@@ -798,7 +828,7 @@ def sync(path, cfp_path):
             )
             continue
         references.setdefault(reference, []).append(slug)
-    results = []
+    candidates = []
     unresolved = bool(store["unresolved"])
     for _, row in sorted(store["rows"].items()):
         item = project(row)
@@ -808,6 +838,38 @@ def sync(path, cfp_path):
             continue
         reference = item["fields"]["cfp_url"]
         slugs = references.get(url(reference), []) if reference is not None else []
+        candidates.append((row, slugs))
+    reserved = len(
+        result_text(
+            {
+                "schema_version": 1,
+                "complete": False,
+                "results": [],
+                "ledger_sha256": checked_hash,
+                "current_ledger_sha256": checked_hash,
+                "generation_changed": False,
+                "unusable_cfp_references": len(reference_holds),
+                "reference_holds": reference_holds,
+            }
+        ).encode()
+    )
+    for row, slugs in candidates:
+        reserved += 2 + (
+            len(result_text({"identity": row["identity"]}).encode()) + MAX_SYNC_OUTCOME
+            if len(slugs) == 1
+            else len(
+                result_text(
+                    {"identity": row["identity"], "outcome": "unmatched_reference"}
+                ).encode()
+            )
+        )
+    if reserved > MAX_OUTPUT:
+        raise Hold(
+            "sync_capacity; no CFP owner invoked; use per-identity reconcile and inspect "
+            "each result without dropping retained evidence"
+        )
+    results = []
+    for row, slugs in candidates:
         if len(slugs) != 1:
             results.append({"identity": row["identity"], "outcome": "unmatched_reference"})
             continue
@@ -820,6 +882,10 @@ def sync(path, cfp_path):
             )
         except Hold as error:
             outcome = {"outcome": "hold", "recovery": str(error)}
+        if len(result_text(outcome).encode()) > MAX_SYNC_OUTCOME:
+            raise RuntimeError(
+                "unexpected_sync_outcome_capacity; inspect actual CFP results before any retry"
+            )
         results.append({"identity": row["identity"], **outcome})
     current = read(path)
     current_hash = digest(current) if current is not None else None
@@ -876,7 +942,7 @@ def main(argv=None):
             result = bind(LEDGER, request)
         else:
             result = reconcile(LEDGER, CFP_STATE, request)
-        output = json.dumps(result, ensure_ascii=False, allow_nan=False)
+        output = result_text(result)
         if len(output.encode()) > MAX_OUTPUT:
             raise Hold(
                 "query_capacity; narrow the query or inspect unresolved source evidence; "

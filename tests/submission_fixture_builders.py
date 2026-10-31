@@ -1533,7 +1533,7 @@ def mail_packet():
                             "source_trust": "untrusted",
                             "messages": [
                                 {
-                                    "messageId": "example-message-1",
+                                    "messageId": "a001",
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "Your sessions at Example Event 2020",
@@ -1559,7 +1559,7 @@ def mail_packet():
                             "source_trust": "untrusted",
                             "messages": [
                                 {
-                                    "messageId": "example-message-2",
+                                    "messageId": "a002",
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "Your sessions at Example Event 2020",
@@ -1585,7 +1585,7 @@ def mail_packet():
                             "source_trust": "untrusted",
                             "messages": [
                                 {
-                                    "messageId": "example-message-3",
+                                    "messageId": "a003",
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "Your sessions at Example Event 2020",
@@ -1625,7 +1625,7 @@ def mail_packet():
                             "source_trust": "untrusted",
                             "messages": [
                                 {
-                                    "messageId": "example-pretalx",
+                                    "messageId": "a004",
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "Your proposal: Example Talk",
@@ -1670,7 +1670,7 @@ def mail_packet():
                             "source_trust": "untrusted",
                             "messages": [
                                 {
-                                    "messageId": "example-message-5",
+                                    "messageId": "a005",
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "Example - Thank you for "
@@ -1699,7 +1699,7 @@ def mail_packet():
                                     "body_complete": True,
                                 },
                                 {
-                                    "messageId": "example-message-6",
+                                    "messageId": "a006",
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "Example - Thank you for "
@@ -1728,7 +1728,7 @@ def mail_packet():
                                     "body_complete": True,
                                 },
                                 {
-                                    "messageId": "example-message-7",
+                                    "messageId": "a007",
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "Example - Thank you for "
@@ -1781,7 +1781,7 @@ def mail_packet():
                             "source_trust": "untrusted",
                             "messages": [
                                 {
-                                    "messageId": "example-message-8",
+                                    "messageId": "a008",
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "[example20] Your talk "
@@ -1807,7 +1807,7 @@ def mail_packet():
                             "source_trust": "untrusted",
                             "messages": [
                                 {
-                                    "messageId": "example-message-9",
+                                    "messageId": "a009",
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "[example20] RSVP "
@@ -1831,7 +1831,7 @@ def mail_packet():
                             "source_trust": "untrusted",
                             "messages": [
                                 {
-                                    "messageId": "example-message-10",
+                                    "messageId": "a00a",
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "[example20] Backup talk status",
@@ -1869,7 +1869,7 @@ def mail_packet():
                             "source_trust": "untrusted",
                             "messages": [
                                 {
-                                    "messageId": "example-pretalx",
+                                    "messageId": "a004",
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "Your proposal: Example Talk",
@@ -1900,7 +1900,7 @@ def mail_packet():
                             "source_trust": "untrusted",
                             "messages": [
                                 {
-                                    "messageId": "example-message-12",
+                                    "messageId": "a00c",
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "Example Event 2020 25-26 "
@@ -1932,7 +1932,7 @@ def mail_packet():
                             "source_trust": "untrusted",
                             "messages": [
                                 {
-                                    "messageId": "example-message-13",
+                                    "messageId": "a00d",
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "Example Event 2020 25-26 "
@@ -1978,7 +1978,7 @@ def mail_packet():
                             "source_trust": "untrusted",
                             "messages": [
                                 {
-                                    "messageId": "example-message-14",
+                                    "messageId": "a00e",
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "[example20] Your "
@@ -2007,7 +2007,7 @@ def mail_packet():
                             "source_trust": "untrusted",
                             "messages": [
                                 {
-                                    "messageId": "example-message-15",
+                                    "messageId": "a00f",
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "[example20] Your "
@@ -2036,7 +2036,7 @@ def mail_packet():
                             "source_trust": "untrusted",
                             "messages": [
                                 {
-                                    "messageId": "example-message-16",
+                                    "messageId": "a010",
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "[example20] Your "
