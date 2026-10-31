@@ -9,7 +9,7 @@ def sessionize_packet():
     return {
         "schema_version": 1,
         "source": "sessionize",
-        "observed_at": "2020-12-01T00:00:00Z",
+        "observed_at": "2020-12-01T00:00:00.000Z",
         "capture": {
             "schema_version": 1,
             "origin": "https://sessionize.com",

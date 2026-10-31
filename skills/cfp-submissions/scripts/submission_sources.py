@@ -340,6 +340,15 @@ def rendered_count(value):
 def sessionize(request):
     """Return observations and scope coverage from the actual rendered tree."""
     require(set(request) == {"schema_version", "source", "observed_at", "capture"}, "capture_shape")
+    stamp = request["observed_at"]
+    require(
+        isinstance(stamp, str)
+        and re.fullmatch(
+            r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]{3}Z", stamp
+        ),
+        "capture_time",
+    )
+    observation_clock(stamp)  # Calendar-real native Date.toISOString() output.
     capture = request["capture"]
     require(
         isinstance(capture, dict)
@@ -923,6 +932,17 @@ def mail_search(search):
                     and retained[2] == direction,
                     "mail_latest_metadata",
                 )
+        if malformed_payload:
+            # The producer replaces an invalid payload with {}, retaining the
+            # native ID/date but emitting empty headers and an incomplete empty
+            # body. Otherwise the malformed message must be among the omissions.
+            malformed_retained = any(
+                not message["body_complete"]
+                and message["body"] == ""
+                and all(message[key] == "" for key in ("from", "to", "subject"))
+                for message in messages
+            )
+            require(thread["messages_omitted"] > 0 or malformed_retained, "mail_thread_coverage")
         thread_gap = undated or body_gap or bool(thread["messages_omitted"]) or malformed_payload
         require(thread["complete"] == (not thread_gap), "mail_thread_coverage")
         gap |= not thread["complete"] or thread_gap

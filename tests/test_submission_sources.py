@@ -375,7 +375,11 @@ def test_unchanged_native_snapshots_over_a_hundred_recaptures_keep_one_fact(
     path = tmp_path / "ledger"
     start = datetime(2020, 12, 1, tzinfo=UTC)
     for capture_number in range(101):
-        dashboard["observed_at"] = (start + timedelta(seconds=capture_number)).isoformat()
+        dashboard["observed_at"] = (
+            (start + timedelta(seconds=capture_number))
+            .isoformat(timespec="milliseconds")
+            .replace("+00:00", "Z")
+        )
         observations, _ = source.prepare(dashboard)
         owner.record(path, observations[0])
     row = next(iter(owner.read(path)["rows"].values()))
@@ -393,7 +397,7 @@ def test_native_status_cycle_and_older_replay_preserve_history_without_downgrade
     first = source.prepare(dashboard)[0][0]
     owner.record(path, first)
     badge.update(classes="badge session-status_20", text="Declined")
-    dashboard["observed_at"] = "2020-12-02T00:00:00Z"
+    dashboard["observed_at"] = "2020-12-02T00:00:00.000Z"
     second = source.prepare(dashboard)[0][0]
     owner.record(path, second)
     query = {"start": "2020-01-01", "end": "2020-12-31"}
@@ -401,7 +405,7 @@ def test_native_status_cycle_and_older_replay_preserve_history_without_downgrade
     owner.record(path, first)
     assert not owner.query(path, query)["matches"]
     badge.update(classes="badge session-status_0", text="Accepted")
-    dashboard["observed_at"] = "2020-12-03T00:00:00Z"
+    dashboard["observed_at"] = "2020-12-03T00:00:00.000Z"
     third = source.prepare(dashboard)[0][0]
     owner.record(path, third)
     result = owner.query(path, query)
@@ -425,7 +429,7 @@ def test_tied_native_snapshots_and_cross_source_conflicts_stay_unresolved(
     query = {"start": "2020-01-01", "end": "2020-12-31"}
     assert owner.query(path, query)["unresolved"][0]["field_state"]["status"] == "conflict"
     badge.update(classes="badge session-status_0", text="Accepted")
-    dashboard["observed_at"] = "2020-12-02T00:00:00Z"
+    dashboard["observed_at"] = "2020-12-02T00:00:00.000Z"
     owner.record(path, source.prepare(dashboard)[0][0])
     mail_claim = deepcopy(first)
     mail_claim["fact"].update(
@@ -447,7 +451,7 @@ def test_new_unknown_native_status_does_not_reuse_an_old_known_status(modules, d
     source, owner = modules
     path = tmp_path / "ledger"
     owner.record(path, source.prepare(dashboard)[0][0])
-    dashboard["observed_at"] = "2020-12-02T00:00:00Z"
+    dashboard["observed_at"] = "2020-12-02T00:00:00.000Z"
     badge = next(n for n in dashboard["capture"]["nodes"] if "session-status_0" in n["classes"])
     badge.update(classes="badge session-status_999", text="Unknown label")
     owner.record(path, source.prepare(dashboard)[0][0])
@@ -1382,14 +1386,22 @@ def failed_stub_packet(source_version, retained, omitted, errors):
         threads.append(thread)
     search = capture["evidence"]
     search.update(threads=threads, threads_omitted=omitted, errors=errors, complete=False)
+    malformed = {error.get("thread_id") for error in errors if error["kind"] == "malformed_payload"}
+    incomplete = []
+    for thread in threads:
+        if thread["thread_id"] in malformed:
+            thread["complete"] = False
+            message = thread["messages"][0]
+            message.update(body="", body_complete=False, subject="", **{"from": "", "to": ""})
+            incomplete.append({"message_id": message["messageId"], "kind": "body_unavailable"})
     if source_version == 2:
         capture["evidence"] = {
             "schema_version": 1,
             "search": search,
             "body_reads": [],
-            "body_reads_omitted": 0,
+            "body_reads_omitted": len(incomplete),
             "complete": False,
-            "errors": [],
+            "errors": incomplete,
         }
     return {"schema_version": source_version, "source": "mail", "collections": [capture]}
 
@@ -1674,6 +1686,9 @@ def test_malformed_search_suffix_omission_remains_supported(modules, source_vers
     search["threads"][0]["complete"] = False
     search["threads"].pop()
     search["threads_omitted"] = 1
+    if source_version == 2:
+        evidence["errors"] = evidence["errors"][:1]
+        evidence["body_reads_omitted"] = 1
     observations, scopes = source.prepare(packet)
     assert len(observations) == 1 and not scopes[0]["complete"]
 
@@ -1932,3 +1947,73 @@ def test_literal_bearer_url_inside_a_template_claim_remains_unknown(modules, sou
     observations, _ = source.prepare(packet)
     assert observations[0]["fact"]["status"] is None
     assert "PRIVATE" not in json.dumps(observations) and "SECRET" not in json.dumps(observations)
+
+
+@pytest.mark.parametrize(
+    "stamp",
+    [
+        "2020-12-01T00:00:00Z",
+        "2020-12-01T00:00:00.000000Z",
+        "2020-12-01T00:00:00.000+00:00",
+        "2020-12-01T00:00:00.000+01:00",
+        "2020-12-01T00:00:00.1Z",
+        "2020-12-01T00:00:00.123456Z",
+        "2020-12-01T00:00:00.1234Z",
+        "20201201T000000Z",
+    ],
+)
+def test_sessionize_requires_native_javascript_capture_clock(modules, dashboard, tmp_path, stamp):
+    source, owner = modules
+    dashboard["observed_at"] = stamp
+    ledger = tmp_path / "ledger"
+    with pytest.raises(source.SourceError, match="capture_time"):
+        owner.record_many(ledger, *source.prepare(dashboard))
+    assert not ledger.exists()
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize("damage", ["complete_template", "incomplete_template", "retained_headers"])
+def test_malformed_payload_needs_an_actual_retained_or_omitted_malformed_message(
+    modules, tmp_path, source_version, damage
+):
+    source, owner = modules
+    packet = failed_stub_packet(
+        source_version, 1, 0, [{"kind": "malformed_payload", "thread_id": "b000"}]
+    )
+    evidence = packet["collections"][0]["evidence"]
+    search = evidence["search"] if source_version == 2 else evidence
+    message = search["threads"][0]["messages"][0]
+    message["subject"] = "Your sessions at Example Event 2020"
+    if damage != "retained_headers":
+        message["body"] = "The following sessions have not been accepted for Example Event"
+        message["body_complete"] = damage == "complete_template"
+    if source_version == 2 and message["body_complete"]:
+        evidence.update(body_reads_omitted=0, errors=[])
+    ledger = tmp_path / "ledger"
+    with pytest.raises(source.SourceError, match="mail_thread_coverage"):
+        owner.record_many(ledger, *source.prepare(packet))
+    assert not ledger.exists()
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+def test_omitted_malformed_message_can_coexist_with_a_complete_retained_template(
+    modules, source_version
+):
+    source, _ = modules
+    packet = failed_stub_packet(
+        source_version, 1, 0, [{"kind": "malformed_payload", "thread_id": "b000"}]
+    )
+    evidence = packet["collections"][0]["evidence"]
+    search = evidence["search"] if source_version == 2 else evidence
+    thread = search["threads"][0]
+    thread.update(message_count=2, messages_omitted=1)
+    thread["messages"][0].update(
+        subject="Your sessions at Example Event 2020",
+        body="The following sessions have not been accepted for Example Event",
+        body_complete=True,
+    )
+    if source_version == 2:
+        evidence.update(body_reads_omitted=0, errors=[])
+    observations, scopes = source.prepare(packet)
+    assert observations[0]["fact"]["status"] == "declined"
+    assert not scopes[0]["complete"]
