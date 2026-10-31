@@ -1539,7 +1539,7 @@ def mail_packet():
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "Your sessions at Example Event 2020",
-                                    "internalDate": "2020-11-01T00:00:00Z",
+                                    "internalDate": "2020-11-01T00:00:00+00:00",
                                     "labelIds": ["IMPORTANT", "CATEGORY_UPDATES"],
                                     "body": "Dear Example! We're sorry, "
                                     "but the following sessions "
@@ -1555,7 +1555,7 @@ def mail_packet():
                             "complete": True,
                             "thread_latest_message_from": "them",
                             "thread_latest_message_id": "a001",
-                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
+                            "thread_latest_message_date": "2020-11-01T00:00:00+00:00",
                             "messages_omitted": 0,
                         },
                         {
@@ -1568,7 +1568,7 @@ def mail_packet():
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "Your sessions at Example Event 2020",
-                                    "internalDate": "2020-11-01T00:00:00Z",
+                                    "internalDate": "2020-11-01T00:00:00+00:00",
                                     "labelIds": ["IMPORTANT", "CATEGORY_UPDATES"],
                                     "body": "Dear Example! We're sorry, "
                                     "but the following sessions "
@@ -1584,7 +1584,7 @@ def mail_packet():
                             "complete": True,
                             "thread_latest_message_from": "them",
                             "thread_latest_message_id": "a002",
-                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
+                            "thread_latest_message_date": "2020-11-01T00:00:00+00:00",
                             "messages_omitted": 0,
                         },
                         {
@@ -1597,7 +1597,7 @@ def mail_packet():
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "Your sessions at Example Event 2020",
-                                    "internalDate": "2020-11-01T00:00:00Z",
+                                    "internalDate": "2020-11-01T00:00:00+00:00",
                                     "labelIds": ["IMPORTANT", "CATEGORY_UPDATES"],
                                     "body": "Dear Example! We're sorry, "
                                     "but the following sessions "
@@ -1613,7 +1613,7 @@ def mail_packet():
                             "complete": True,
                             "thread_latest_message_from": "them",
                             "thread_latest_message_id": "a003",
-                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
+                            "thread_latest_message_date": "2020-11-01T00:00:00+00:00",
                             "messages_omitted": 0,
                         },
                     ],
@@ -1640,7 +1640,7 @@ def mail_packet():
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "Your proposal: Example Talk",
-                                    "internalDate": "2020-11-01T00:00:00Z",
+                                    "internalDate": "2020-11-01T00:00:00+00:00",
                                     "labelIds": ["UNREAD", "IMPORTANT", "CATEGORY_UPDATES"],
                                     "body": "Hi! We have received your "
                                     "proposal “Example Talk” to "
@@ -1661,7 +1661,7 @@ def mail_packet():
                             "complete": True,
                             "thread_latest_message_from": "them",
                             "thread_latest_message_id": "a004",
-                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
+                            "thread_latest_message_date": "2020-11-01T00:00:00+00:00",
                             "messages_omitted": 0,
                         }
                     ],
@@ -1690,26 +1690,20 @@ def mail_packet():
                                     "subject": "Example - Thank you for "
                                     "submitting your proposal "
                                     "to speak at Example",
-                                    "internalDate": "2020-11-01T00:00:00Z",
+                                    "internalDate": "2020-11-01T00:00:00+00:00",
                                     "labelIds": [
                                         "UNREAD",
                                         "IMPORTANT",
                                         "Label_66",
                                         "CATEGORY_UPDATES",
                                     ],
-                                    "body": "<p>Dear Example,<br/>Thank "
-                                    "you for submitting your "
-                                    "proposal to speak at "
-                                    "<a><strong>Example Event "
-                                    "2020</strong></a>, from "
-                                    "13-15 April 2020 in Example "
-                                    "City.<br/>We will review "
-                                    "completed proposals and let "
-                                    "you know whether your "
-                                    "abstract has been accepted "
-                                    "for "
-                                    "presentation.<br/>Powered "
-                                    "by Oxford Abstracts</p>",
+                                    "body": (
+                                        "Dear Example, Thank you for submitting your proposal to "
+                                        "speak at Example Event 2020, from 13-15 April 2020 in "
+                                        "Example City. We will review completed proposals and "
+                                        "let you know whether your abstract has been accepted "
+                                        "for presentation. Powered by Oxford Abstracts"
+                                    ),
                                     "body_complete": True,
                                 },
                                 {
@@ -1719,26 +1713,20 @@ def mail_packet():
                                     "subject": "Example - Thank you for "
                                     "submitting your proposal "
                                     "to speak at Example",
-                                    "internalDate": "2020-11-01T00:00:00Z",
+                                    "internalDate": "2020-11-01T00:00:00+00:00",
                                     "labelIds": [
                                         "UNREAD",
                                         "IMPORTANT",
                                         "Label_66",
                                         "CATEGORY_PERSONAL",
                                     ],
-                                    "body": "<p>Dear Example,<br/>Thank "
-                                    "you for submitting your "
-                                    "proposal to speak at "
-                                    "<a><strong>Example Event "
-                                    "2020</strong></a>, from "
-                                    "13-15 April 2020 in Example "
-                                    "City.<br/>We will review "
-                                    "completed proposals and let "
-                                    "you know whether your "
-                                    "abstract has been accepted "
-                                    "for "
-                                    "presentation.<br/>Powered "
-                                    "by Oxford Abstracts</p>",
+                                    "body": (
+                                        "Dear Example, Thank you for submitting your proposal to "
+                                        "speak at Example Event 2020, from 13-15 April 2020 in "
+                                        "Example City. We will review completed proposals and "
+                                        "let you know whether your abstract has been accepted "
+                                        "for presentation. Powered by Oxford Abstracts"
+                                    ),
                                     "body_complete": True,
                                 },
                                 {
@@ -1748,26 +1736,20 @@ def mail_packet():
                                     "subject": "Example - Thank you for "
                                     "submitting your proposal "
                                     "to speak at Example",
-                                    "internalDate": "2020-11-01T00:00:00Z",
+                                    "internalDate": "2020-11-01T00:00:00+00:00",
                                     "labelIds": [
                                         "UNREAD",
                                         "IMPORTANT",
                                         "Label_66",
                                         "CATEGORY_PERSONAL",
                                     ],
-                                    "body": "<p>Dear Example,<br/>Thank "
-                                    "you for submitting your "
-                                    "proposal to speak at "
-                                    "<a><strong>Example Event "
-                                    "2020</strong></a>, from "
-                                    "13-15 April 2020 in Example "
-                                    "City.<br/>We will review "
-                                    "completed proposals and let "
-                                    "you know whether your "
-                                    "abstract has been accepted "
-                                    "for "
-                                    "presentation.<br/>Powered "
-                                    "by Oxford Abstracts</p>",
+                                    "body": (
+                                        "Dear Example, Thank you for submitting your proposal to "
+                                        "speak at Example Event 2020, from 13-15 April 2020 in "
+                                        "Example City. We will review completed proposals and "
+                                        "let you know whether your abstract has been accepted "
+                                        "for presentation. Powered by Oxford Abstracts"
+                                    ),
                                     "body_complete": True,
                                 },
                             ],
@@ -1775,7 +1757,7 @@ def mail_packet():
                             "complete": True,
                             "thread_latest_message_from": "them",
                             "thread_latest_message_id": None,
-                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
+                            "thread_latest_message_date": "2020-11-01T00:00:00+00:00",
                             "messages_omitted": 0,
                         }
                     ],
@@ -1804,7 +1786,7 @@ def mail_packet():
                                     "subject": "[example20] Your talk "
                                     "has been assigned a room "
                                     "for Example Event",
-                                    "internalDate": "2020-11-01T00:00:00Z",
+                                    "internalDate": "2020-11-01T00:00:00+00:00",
                                     "labelIds": ["IMPORTANT", "CATEGORY_UPDATES"],
                                     "body": "Your talk has now been "
                                     "assigned a room! Talk: "
@@ -1818,7 +1800,7 @@ def mail_packet():
                             "complete": True,
                             "thread_latest_message_from": "them",
                             "thread_latest_message_id": "a008",
-                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
+                            "thread_latest_message_date": "2020-11-01T00:00:00+00:00",
                             "messages_omitted": 0,
                         },
                         {
@@ -1833,7 +1815,7 @@ def mail_packet():
                                     "subject": "[example20] RSVP "
                                     "Required: Example Event "
                                     "Speakers Reception",
-                                    "internalDate": "2020-11-01T00:00:00Z",
+                                    "internalDate": "2020-11-01T00:00:00+00:00",
                                     "labelIds": ["IMPORTANT", "CATEGORY_UPDATES"],
                                     "body": "Dear Example, We invite you "
                                     "to our Speakers Reception. "
@@ -1845,7 +1827,7 @@ def mail_packet():
                             "complete": True,
                             "thread_latest_message_from": "them",
                             "thread_latest_message_id": "a009",
-                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
+                            "thread_latest_message_date": "2020-11-01T00:00:00+00:00",
                             "messages_omitted": 0,
                         },
                         {
@@ -1858,7 +1840,7 @@ def mail_packet():
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "[example20] Backup talk status",
-                                    "internalDate": "2020-11-01T00:00:00Z",
+                                    "internalDate": "2020-11-01T00:00:00+00:00",
                                     "labelIds": ["IMPORTANT", "CATEGORY_UPDATES"],
                                     "body": "Your talk currently marked "
                                     "as Backup for Example "
@@ -1872,7 +1854,7 @@ def mail_packet():
                             "complete": True,
                             "thread_latest_message_from": "them",
                             "thread_latest_message_id": "a00a",
-                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
+                            "thread_latest_message_date": "2020-11-01T00:00:00+00:00",
                             "messages_omitted": 0,
                         },
                     ],
@@ -1899,7 +1881,7 @@ def mail_packet():
                                     "from": "Example Source <source@example.invalid>",
                                     "to": "owner@example.invalid",
                                     "subject": "Your proposal: Example Talk",
-                                    "internalDate": "2020-11-01T00:00:00Z",
+                                    "internalDate": "2020-11-01T00:00:00+00:00",
                                     "labelIds": ["UNREAD", "IMPORTANT", "CATEGORY_UPDATES"],
                                     "body": "Hi! We have received your "
                                     "proposal “Example Talk” to "
@@ -1920,7 +1902,7 @@ def mail_packet():
                             "complete": True,
                             "thread_latest_message_from": "them",
                             "thread_latest_message_id": "a004",
-                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
+                            "thread_latest_message_date": "2020-11-01T00:00:00+00:00",
                             "messages_omitted": 0,
                         },
                         {
@@ -1935,7 +1917,7 @@ def mail_packet():
                                     "subject": "Example Event 2020 25-26 "
                                     "May We received your "
                                     "proposal: Example Talk",
-                                    "internalDate": "2020-11-01T00:00:00Z",
+                                    "internalDate": "2020-11-01T00:00:00+00:00",
                                     "labelIds": ["IMPORTANT", "CATEGORY_PERSONAL"],
                                     "body": "Hi Example Speaker, Thank "
                                     'you for submitting "Example '
@@ -1955,7 +1937,7 @@ def mail_packet():
                             "complete": True,
                             "thread_latest_message_from": "them",
                             "thread_latest_message_id": "a00c",
-                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
+                            "thread_latest_message_date": "2020-11-01T00:00:00+00:00",
                             "messages_omitted": 0,
                         },
                         {
@@ -1970,7 +1952,7 @@ def mail_packet():
                                     "subject": "Example Event 2020 25-26 "
                                     "May We received your "
                                     "proposal: Example Talk",
-                                    "internalDate": "2020-11-01T00:00:00Z",
+                                    "internalDate": "2020-11-01T00:00:00+00:00",
                                     "labelIds": ["UNREAD", "IMPORTANT", "CATEGORY_PERSONAL"],
                                     "body": "Hi Example Speaker, Thank "
                                     'you for submitting "Example '
@@ -1990,7 +1972,7 @@ def mail_packet():
                             "complete": True,
                             "thread_latest_message_from": "them",
                             "thread_latest_message_id": "a00d",
-                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
+                            "thread_latest_message_date": "2020-11-01T00:00:00+00:00",
                             "messages_omitted": 0,
                         },
                     ],
@@ -2019,7 +2001,7 @@ def mail_packet():
                                     "subject": "[example20] Your "
                                     "proposal has been "
                                     "refused : Example Talk",
-                                    "internalDate": "2020-11-01T00:00:00Z",
+                                    "internalDate": "2020-11-01T00:00:00+00:00",
                                     "labelIds": ["IMPORTANT", "CATEGORY_UPDATES"],
                                     "body": "Dear Example, Thank you for "
                                     "submitting your proposal "
@@ -2036,7 +2018,7 @@ def mail_packet():
                             "complete": True,
                             "thread_latest_message_from": "them",
                             "thread_latest_message_id": "a00e",
-                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
+                            "thread_latest_message_date": "2020-11-01T00:00:00+00:00",
                             "messages_omitted": 0,
                         },
                         {
@@ -2051,7 +2033,7 @@ def mail_packet():
                                     "subject": "[example20] Your "
                                     "proposal has been "
                                     "accepted : Example Talk",
-                                    "internalDate": "2020-11-01T00:00:00Z",
+                                    "internalDate": "2020-11-01T00:00:00+00:00",
                                     "labelIds": ["UNREAD", "IMPORTANT", "CATEGORY_UPDATES"],
                                     "body": "Congratulations! We are "
                                     "thrilled to inform you that "
@@ -2068,7 +2050,7 @@ def mail_packet():
                             "complete": True,
                             "thread_latest_message_from": "them",
                             "thread_latest_message_id": "a00f",
-                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
+                            "thread_latest_message_date": "2020-11-01T00:00:00+00:00",
                             "messages_omitted": 0,
                         },
                         {
@@ -2083,7 +2065,7 @@ def mail_packet():
                                     "subject": "[example20] Your "
                                     "proposal Example Talk is "
                                     "marked as backup",
-                                    "internalDate": "2020-11-01T00:00:00Z",
+                                    "internalDate": "2020-11-01T00:00:00+00:00",
                                     "labelIds": ["UNREAD", "IMPORTANT", "CATEGORY_UPDATES"],
                                     "body": "Thank you for submitting "
                                     'your proposal "Example '
@@ -2100,7 +2082,7 @@ def mail_packet():
                             "complete": True,
                             "thread_latest_message_from": "them",
                             "thread_latest_message_id": "a010",
-                            "thread_latest_message_date": "2020-11-01T00:00:00Z",
+                            "thread_latest_message_date": "2020-11-01T00:00:00+00:00",
                             "messages_omitted": 0,
                         },
                     ],

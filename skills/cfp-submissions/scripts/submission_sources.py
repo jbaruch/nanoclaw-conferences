@@ -24,7 +24,6 @@ import json
 import re
 import unicodedata
 from datetime import date, datetime, timedelta
-from html.parser import HTMLParser
 from urllib.parse import urlsplit
 
 MAX_NODES = 12000
@@ -523,31 +522,11 @@ def sessionize(request):
     return observations, [scope_record("sessionize", account_scope, request["observed_at"], gaps)]
 
 
-class VisibleMail(HTMLParser):
-    def __init__(self):
-        super().__init__(convert_charrefs=True)
-        self.parts = []
-        self.hidden = 0
-
-    def handle_starttag(self, tag, attrs):
-        if tag in {"script", "style"}:
-            self.hidden += 1
-
-    def handle_endtag(self, tag):
-        if tag in {"script", "style"}:
-            self.hidden = max(0, self.hidden - 1)
-
-    def handle_data(self, data):
-        if not self.hidden:
-            self.parts.append(data)
-
-
-def mail_text(body):
-    bounded(body, MAX_BODY)
-    parser = VisibleMail()
-    parser.feed(body)
-    # No edit link (including its bearer path) reaches a retained field.
-    return " ".join(re.sub(r"https?://\S+", " ", " ".join(parser.parts)).split())
+def mail_text(body, complete=True):
+    """Read unchanged Admin plain text; literal markup and URLs are evidence."""
+    result = bounded(body, MAX_BODY)
+    require(canonical_mail_text(result, allow_trailing=not complete), "mail_body")
+    return result
 
 
 def template_pair(body, patterns, suffix):
@@ -601,6 +580,7 @@ def mail_fields(family, subject, body):
             body,
             [
                 ("Thank you for submitting your proposal to speak at ", " , from "),
+                ("Thank you for submitting your proposal to speak at ", ", from "),
                 ("Thank you for submitting your proposal to speak at ", " from "),
             ],
             ". We will review completed proposals",
@@ -654,6 +634,12 @@ def mail_fields(family, subject, body):
             )
         ):
             result.update(talk_title=proposal[0], event_name=proposal[1], status="waitlisted")
+    # Retain literal source text for matching, but never project an edit/bearer
+    # URL into a claim field. Unsupported claim text remains wholly unknown.
+    if any(
+        isinstance(value, str) and re.search(r"https?://", value, re.I) for value in result.values()
+    ):
+        return {}
     return result
 
 
@@ -666,29 +652,49 @@ def mail_bytes(value):
         raise SourceError("mail_encoding; retain the unsupported provider evidence") from error
 
 
+def canonical_mail_text(value, *, allow_trailing=False):
+    """Validate producer output invariants without rewriting its evidence."""
+    return (
+        unicodedata.normalize("NFKC", value) == value
+        and not value.startswith(" ")
+        and (allow_trailing or not value.endswith(" "))
+        and "  " not in value
+        and all(not c.isspace() or c == " " for c in value)
+        and not any(
+            unicodedata.category(c) in {"Cf", "Cc", "Cs"}
+            or c in "\u034f\u115f\u1160\u17b4\u17b5\u3164\uffa0"
+            for c in value
+        )
+        and re.search(r"([^\x00-\x7f])(?:\s*\1){3,}", value) is None
+    )
+
+
 def mail_header(value):
     """Require Admin's canonical output; never sanitize an unsupported input."""
     result = bounded(value, 306)
     clipped = len(result) == 306 and result.endswith(" [...]")
     require(len(result) <= 300 or clipped, "mail_header")
     prefix = result[:300] if clipped else result
-    # The producer normalizes before truncating. A cut can retain one trailing
-    # space at position300; its fixed marker then legitimately adds another.
-    require(
-        unicodedata.normalize("NFKC", prefix) == prefix
-        and not prefix.startswith(" ")
-        and (clipped or not prefix.endswith(" "))
-        and "  " not in prefix
-        and all(not c.isspace() or c == " " for c in prefix)
-        and not any(
-            unicodedata.category(c) in {"Cf", "Cc", "Cs"}
-            or c in "\u034f\u115f\u1160\u17b4\u17b5\u3164\uffa0"
-            for c in prefix
-        )
-        and re.search(r"([^\x00-\x7f])(?:\s*\1){3,}", prefix) is None,
-        "mail_header",
-    )
+    # A cut can retain a trailing space before the fixed marker's own space.
+    require(canonical_mail_text(prefix, allow_trailing=clipped), "mail_header")
     return result
+
+
+def mail_native_clock(value, code):
+    """Require the native millisecond-to-UTC isoformat serialization exactly."""
+    stamp = observation_clock(value)
+    require(stamp.utcoffset() == timedelta(0), code)
+    epoch = datetime(1970, 1, 1, tzinfo=stamp.tzinfo)
+    delta = stamp - epoch
+    milliseconds = (delta.days * 86400 + delta.seconds) * 1000 + round(delta.microseconds / 1000)
+    try:
+        # Round-trip the nearest source millisecond through the same native
+        # serialization, including float precision at far-range valid dates.
+        native = datetime.fromtimestamp(milliseconds / 1000, stamp.tzinfo).isoformat()
+    except (ValueError, OverflowError, OSError) as error:
+        raise SourceError(f"{code}; retain unsupported native message time") from error
+    require(value == native, code)
+    return stamp
 
 
 def mail_search(search):
@@ -848,11 +854,11 @@ def mail_search(search):
             )
             require(type(message["body_complete"]) is bool, "mail_body_coverage")
             bounded(message["body"], 6000)
+            mail_text(message["body"], message["body_complete"])
             if message["internalDate"] is None:
                 undated = True
             else:
-                stamp = observation_clock(message["internalDate"])
-                require(stamp.utcoffset() == timedelta(0), "mail_message_date")
+                stamp = mail_native_clock(message["internalDate"], "mail_message_date")
                 dated.append((stamp, mid, "me" if "SENT" in labels else "them"))
             originals[mid] = (tid, message)
             require(len(originals) <= MAX_MAIL_READS, "mail_message_bounds")
@@ -876,7 +882,7 @@ def mail_search(search):
         if latest_date is None:
             require(latest_id is None and direction == "unknown", "mail_latest_metadata")
         else:
-            latest = observation_clock(latest_date)
+            latest = mail_native_clock(latest_date, "mail_latest_date")
             require(
                 latest.utcoffset() == timedelta(0)
                 and not undated
@@ -1013,7 +1019,7 @@ def mail_handoff(wrapper):
         mail_header(full["subject"])
         mail_header(full["from"])
         require(full["subject"] == original["subject"], "mail_body_binding")
-        body = bounded(full["body"], MAX_BODY)
+        body = mail_text(full["body"], full["body_complete"])
         require(len(body.encode()) <= MAX_BODY, "mail_body_bounds")
         reads[mid] = full
     for error in list_value(wrapper["errors"], "mail_handoff_errors"):
@@ -1135,7 +1141,9 @@ def mail(request):
                     raw_body, body_complete = full["body"], full["body_complete"]
                 fingerprint = sha([subject, source_at, raw_body, body_complete])
                 fields = (
-                    {} if len(subject) > 300 else mail_fields(family, subject, mail_text(raw_body))
+                    {}
+                    if len(subject) > 300
+                    else mail_fields(family, subject, mail_text(raw_body, body_complete))
                 )
                 if not fields:
                     gaps.append("source template unsupported; no status inferred")

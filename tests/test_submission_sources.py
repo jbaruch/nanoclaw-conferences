@@ -157,7 +157,7 @@ def test_mail_real_template_families_unknowns_and_cross_family_dedup(modules, ma
         None: 3,
     }
     assert all(v["fact"]["submitted_on"] is None for v in observations)
-    assert all(v["fact"]["source_at"] == "2020-11-01T00:00:00Z" for v in observations)
+    assert all(v["fact"]["source_at"] == "2020-11-01T00:00:00+00:00" for v in observations)
     assert all(not v["complete"] for v in scopes)
     # Three identical Oxford confirmations are evidence, never three identified proposals.
     oxford = [
@@ -712,7 +712,7 @@ def hydrated_mail(*, partial=False, missing=False):
         "from": "source@example.invalid",
         "to": "owner@example.invalid",
         "subject": "Your proposal: Example Talk",
-        "internalDate": "2020-11-01T00:00:00Z",
+        "internalDate": "2020-11-01T00:00:00+00:00",
         "labelIds": [],
         "body": "Incomplete prefix",
         "body_complete": False,
@@ -801,7 +801,7 @@ def test_hydrated_positive_keeps_original_search_and_all_gaps(modules, tmp_path)
     assert packet == before
     assert observations[0]["fact"]["status"] == "submitted"
     assert observations[0]["fact"]["complete"] is True
-    assert observations[0]["fact"]["source_at"] == "2020-11-01T00:00:00Z"
+    assert observations[0]["fact"]["source_at"] == "2020-11-01T00:00:00+00:00"
     assert not scopes[0]["complete"]
     assert "search incomplete, paginated, omitted or failed" in scopes[0]["gaps"]
     assert "thread incomplete or messages omitted" in scopes[0]["gaps"]
@@ -980,7 +980,7 @@ def test_source2_exact_utf8_body_bound_retains_whole_body(modules):
     source, _ = modules
     packet = hydrated_mail()
     body = packet["collections"][0]["evidence"]["body_reads"][0]["evidence"]
-    body["body"] = "é" * (128 * 1024)
+    body["body"] = "éA" * ((256 * 1024) // 3) + "A"
     observations, scopes = source.prepare(packet)
     assert observations[0]["fact"]["complete"] is True
     assert observations[0]["fact"]["status"] is None
@@ -1145,7 +1145,7 @@ def test_search1_valid_retained_latest_metadata_and_unknowns(modules, metadata):
             message_count=2,
             messages_omitted=1,
             thread_latest_message_id="a002",
-            thread_latest_message_date="2020-11-02T00:00:00Z",
+            thread_latest_message_date="2020-11-02T00:00:00+00:00",
         )
     elif metadata == "tied_latest":
         thread["messages"].append(
@@ -1213,7 +1213,7 @@ def test_mail_rejects_impossible_cross_field_relationships(modules, source_versi
             message_count=2,
             messages_omitted=1,
             thread_latest_message_id="a002",
-            thread_latest_message_date="2020-11-02T00:00:00Z",
+            thread_latest_message_date="2020-11-02T00:00:00+00:00",
             thread_latest_message_from="unknown",
         )
     else:
@@ -1284,13 +1284,13 @@ def test_latest_omitted_mail_ids_keep_global_native_thread_binding(
             message_count=2,
             messages_omitted=1,
             thread_latest_message_id=repeated,
-            thread_latest_message_date="2020-11-02T00:00:00Z",
+            thread_latest_message_date="2020-11-02T00:00:00+00:00",
         )
     omitted["evidence"]["search"]["threads"][0].update(
         message_count=2,
         messages_omitted=1,
         thread_latest_message_id=repeated,
-        thread_latest_message_date="2020-11-02T00:00:00Z",
+        thread_latest_message_date="2020-11-02T00:00:00+00:00",
     )
     packet["schema_version"] = source_version
     if source_version == 1:
@@ -1797,3 +1797,138 @@ def test_canonical_unicode_and_truncation_boundary_headers_remain_supported(
         packet["collections"][0]["evidence"] = wrapper["search"]
     observations, scopes = source.prepare(packet)
     assert len(observations) == 1 and not scopes[0]["complete"]
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize(
+    "insert", ["<b>received</b>", "https://example.invalid/PRIVATE?token=SECRET received"]
+)
+def test_literal_native_body_content_cannot_be_rewritten_into_a_submission(
+    modules, source_version, insert
+):
+    source, _ = modules
+    packet = hydrated_mail()
+    wrapper = packet["collections"][0]["evidence"]
+    body = wrapper["body_reads"][0]["evidence"]["body"].replace("have received", "have " + insert)
+    wrapper["body_reads"][0]["evidence"]["body"] = body
+    if source_version == 1:
+        message = wrapper["search"]["threads"][0]["messages"][0]
+        message.update(body=body, body_complete=True)
+        wrapper["search"]["threads"][0]["complete"] = True
+        wrapper["search"]["complete"] = True
+        packet["schema_version"] = 1
+        packet["collections"][0]["evidence"] = wrapper["search"]
+    observations, _ = source.prepare(packet)
+    assert observations[0]["fact"]["status"] is None
+    assert "PRIVATE" not in json.dumps(observations) and "SECRET" not in json.dumps(observations)
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize(
+    "body",
+    [
+        "We\thave received",
+        "We  have received",
+        "Ｗe have received",
+        "We\u200bhave received",
+        "We have received\r\n",
+    ],
+)
+def test_native_body_must_already_have_sanitized_form_before_any_commit(
+    modules, tmp_path, source_version, body
+):
+    source, owner = modules
+    packet = hydrated_mail()
+    wrapper = packet["collections"][0]["evidence"]
+    if source_version == 1:
+        wrapper["search"]["threads"][0]["messages"][0]["body"] = body
+        packet["schema_version"] = 1
+        packet["collections"][0]["evidence"] = wrapper["search"]
+    else:
+        wrapper["body_reads"][0]["evidence"]["body"] = body
+    ledger = tmp_path / "ledger"
+    with pytest.raises(source.SourceError, match="mail_body"):
+        owner.record_many(ledger, *source.prepare(packet))
+    assert not ledger.exists()
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize("field", ["message", "latest"])
+@pytest.mark.parametrize(
+    "stamp",
+    [
+        "2020-11-01T00:00:00Z",
+        "2020-11-01T00:00:00.000+00:00",
+        "2020-11-01T00:00:00.123+00:00",
+        "2020-11-01 00:00:00+00:00",
+        "20201101T000000+00:00",
+        "2020-11-01T00:00:00.123456+00:00",
+        "2020-11-01T00:00:00+0000",
+    ],
+)
+def test_native_mail_dates_require_exact_millisecond_derived_serialization(
+    modules, tmp_path, source_version, field, stamp
+):
+    from datetime import datetime
+
+    source, owner = modules
+    packet = hydrated_mail()
+    wrapper = packet["collections"][0]["evidence"]
+    thread = wrapper["search"]["threads"][0]
+    if field == "message":
+        thread["messages"][0]["internalDate"] = stamp
+        thread["thread_latest_message_date"] = datetime.fromisoformat(stamp).isoformat()
+        wrapper["body_reads"][0]["internalDate"] = stamp
+    else:
+        thread.update(
+            thread_latest_message_date=stamp,
+            thread_latest_message_id="a099",
+            messages_omitted=1,
+            message_count=2,
+        )
+    if source_version == 1:
+        packet["schema_version"] = 1
+        packet["collections"][0]["evidence"] = wrapper["search"]
+    ledger = tmp_path / "ledger"
+    with pytest.raises(source.SourceError, match="mail_.*date|source_time"):
+        owner.record_many(ledger, *source.prepare(packet))
+    assert not ledger.exists()
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize("stamp", ["2020-11-01T00:00:00+00:00", "2020-11-01T00:00:00.123000+00:00"])
+def test_canonical_native_date_precision_remains_unchanged(modules, source_version, stamp):
+    source, _ = modules
+    packet = hydrated_mail()
+    wrapper = packet["collections"][0]["evidence"]
+    thread = wrapper["search"]["threads"][0]
+    thread["messages"][0]["internalDate"] = stamp
+    thread["thread_latest_message_date"] = stamp
+    wrapper["body_reads"][0]["internalDate"] = stamp
+    if source_version == 1:
+        packet["schema_version"] = 1
+        packet["collections"][0]["evidence"] = wrapper["search"]
+    observations, _ = source.prepare(packet)
+    assert observations[0]["fact"]["source_at"] == stamp
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+def test_literal_bearer_url_inside_a_template_claim_remains_unknown(modules, source_version):
+    source, _ = modules
+    packet = hydrated_mail()
+    wrapper = packet["collections"][0]["evidence"]
+    title = "https://example.invalid/PRIVATE?token=SECRET"
+    subject = "Your proposal: " + title
+    body = f'We have received your proposal "{title}" to Example Event. We will notify you'
+    message = wrapper["search"]["threads"][0]["messages"][0]
+    message["subject"] = subject
+    wrapper["body_reads"][0]["evidence"].update(subject=subject, body=body)
+    if source_version == 1:
+        message.update(body=body, body_complete=True)
+        wrapper["search"]["threads"][0]["complete"] = True
+        wrapper["search"]["complete"] = True
+        packet["schema_version"] = 1
+        packet["collections"][0]["evidence"] = wrapper["search"]
+    observations, _ = source.prepare(packet)
+    assert observations[0]["fact"]["status"] is None
+    assert "PRIVATE" not in json.dumps(observations) and "SECRET" not in json.dumps(observations)

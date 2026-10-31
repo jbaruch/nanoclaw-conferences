@@ -82,7 +82,7 @@ def test_real_owner_large_body_imports_without_body_stdout_and_removes_known_inp
 ):
     _, owner, temporary = environment
     wrapper = hydrated_mail()["collections"][0]["evidence"]
-    private = "PRIVATE-SYNTHETIC-TEXT " * 2000
+    private = ("PRIVATE-SYNTHETIC-TEXT " * 2000).rstrip()
     wrapper["body_reads"][0]["evidence"]["body"] += " " + private
     capture, parent, _ = retained(temporary, wrapper=wrapper)
     assert capture["receipt"]["bytes"] > 25 * 1024
