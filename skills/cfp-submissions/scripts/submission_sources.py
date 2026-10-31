@@ -667,9 +667,27 @@ def mail_bytes(value):
 
 
 def mail_header(value):
-    """Admin sanitization retains its fixed marker after a cut header."""
+    """Require Admin's canonical output; never sanitize an unsupported input."""
     result = bounded(value, 306)
-    require(len(result) <= 300 or len(result) == 306 and result.endswith(" [...]"), "mail_header")
+    clipped = len(result) == 306 and result.endswith(" [...]")
+    require(len(result) <= 300 or clipped, "mail_header")
+    prefix = result[:300] if clipped else result
+    # The producer normalizes before truncating. A cut can retain one trailing
+    # space at position300; its fixed marker then legitimately adds another.
+    require(
+        unicodedata.normalize("NFKC", prefix) == prefix
+        and not prefix.startswith(" ")
+        and (clipped or not prefix.endswith(" "))
+        and "  " not in prefix
+        and all(not c.isspace() or c == " " for c in prefix)
+        and not any(
+            unicodedata.category(c) in {"Cf", "Cc", "Cs"}
+            or c in "\u034f\u115f\u1160\u17b4\u17b5\u3164\uffa0"
+            for c in prefix
+        )
+        and re.search(r"([^\x00-\x7f])(?:\s*\1){3,}", prefix) is None,
+        "mail_header",
+    )
     return result
 
 

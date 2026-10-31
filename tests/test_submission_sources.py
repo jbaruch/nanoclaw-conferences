@@ -1096,7 +1096,7 @@ def test_search1_nested_contract_validates_before_any_commit(
     assert not ledger_path.exists()
 
 
-@pytest.mark.parametrize("suffix", ["Example\tEvent\r\n2020", "X" * 301])
+@pytest.mark.parametrize("suffix", ["Example Event 2020", "X" * 301])
 def test_declined_subject_claims_are_bounded_without_losing_status(modules, tmp_path, suffix):
     source, owner = modules
     fields = source.mail_fields(
@@ -1109,8 +1109,8 @@ def test_declined_subject_claims_are_bounded_without_losing_status(modules, tmp_
     fact = source.new_fact("mail", "bounded-decline", "2020-12-01T00:00:00Z", **fields)
     fact["citation"] = {"kind": "mail", "id": "a001", "url": None}
     assert owner.record_many(tmp_path / "ledger", [{"identity": None, "fact": fact}], [])["changed"]
-    # A bounded provider subject can contain whitespace controls; compose the
-    # complete search1 adapter and real ledger rather than testing only a field.
+    # Compose a canonical producer subject through search1 and the real ledger;
+    # oversize direct-parser inputs still cannot pass the adapter.
     packet = hydrated_mail()
     search = packet["collections"][0]["evidence"]["search"]
     message = search["threads"][0]["messages"][0]
@@ -1732,3 +1732,68 @@ def test_hydration_suffix_omission_preserves_independent_failures(modules, failu
     observations, scopes = source.prepare(packet)
     assert len(observations) == 3 and not scopes[0]["complete"]
     assert sum(item["fact"]["complete"] for item in observations) == 1
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize("field", ["subject", "from", "to"])
+@pytest.mark.parametrize(
+    "header",
+    [
+        "Example\tEvent",
+        "Example\r\nEvent",
+        "Example  Event",
+        " Example Event",
+        "Example Event ",
+        "Example\u200bEvent",
+        "Ｅvent",
+        "Cafe\u0301",
+        "Ϗ Ϗ Ϗ Ϗ",
+        "Example\x7fEvent",
+        "Example\u034fEvent",
+        "Example\u115fEvent",
+    ],
+)
+def test_mail_headers_must_already_match_sanitized_producer_form(
+    modules, tmp_path, source_version, field, header
+):
+    source, owner = modules
+    packet = hydrated_mail()
+    wrapper = packet["collections"][0]["evidence"]
+    wrapper["search"]["threads"][0]["messages"][0][field] = header
+    if field != "to":
+        wrapper["body_reads"][0]["evidence"][field] = header
+    if source_version == 1:
+        packet["schema_version"] = 1
+        packet["collections"][0]["evidence"] = wrapper["search"]
+    ledger = tmp_path / "ledger"
+    with pytest.raises(source.SourceError, match="mail_header"):
+        owner.record_many(ledger, *source.prepare(packet))
+    assert not ledger.exists()
+
+
+@pytest.mark.parametrize("header", ["Example\tSender", "Example  Sender", "Ｓender"])
+def test_hydrated_sender_requires_canonical_producer_form(modules, header):
+    source, _ = modules
+    packet = hydrated_mail()
+    packet["collections"][0]["evidence"]["body_reads"][0]["evidence"]["from"] = header
+    with pytest.raises(source.SourceError, match="mail_header"):
+        source.prepare(packet)
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize(
+    "header", ["café", "Привет", "עברית", "अंतर", "ASCII!!!!", "X" * 299 + "  [...]"]
+)
+def test_canonical_unicode_and_truncation_boundary_headers_remain_supported(
+    modules, source_version, header
+):
+    source, _ = modules
+    packet = hydrated_mail()
+    wrapper = packet["collections"][0]["evidence"]
+    wrapper["search"]["threads"][0]["messages"][0]["from"] = header
+    wrapper["body_reads"][0]["evidence"]["from"] = header
+    if source_version == 1:
+        packet["schema_version"] = 1
+        packet["collections"][0]["evidence"] = wrapper["search"]
+    observations, scopes = source.prepare(packet)
+    assert len(observations) == 1 and not scopes[0]["complete"]
