@@ -1,6 +1,6 @@
 # Submission source inputs
 
-Owner: `cfp-submissions/scripts/submission_sources.py`, called only by the co-shipped `submissions.py import` action. One bounded JSON stdin packet, no network calls. The owner validates all proposed facts, all retained state and all coverage before one ledger publication. Raw captures are private invocation input, not another durable store. Do not retain complete messages, raw DOM, private edit URLs or credentials in the ledger.
+Owner: `cfp-submissions/scripts/submission_sources.py`, called by the co-shipped `submissions.py import` and receipt-backed `import-mail-artifacts` actions. One bounded JSON stdin packet, no network calls. The owner validates all proposed facts, all retained state and all coverage before one ledger publication. Raw captures are private invocation input, not another durable store. Do not retain complete messages, raw DOM, private edit URLs or credentials in the ledger.
 
 These adapters parse structures; they do not authenticate caller-supplied JSON, Main identity, a mailbox sender, a source clock or an owner message. Genuine collection remains with the installed Admin read owners and supported visible-browser owner. Runtime role/credential grants are unchanged. The schema reference is `skills/cfp-submissions/references/state-schema.md`, installed at `/home/node/.claude/skills/tessl__cfp-submissions/references/state-schema.md`.
 
@@ -73,9 +73,50 @@ This source1 format is retained unchanged for previously collected search1 evide
 
 ### Full-body handoff: mail source2
 
-The installed Admin Google-access declaration `mailEvidenceContract: admin-mail-evidence-v1` and complete `skills/ask-my-data/references/mail-evidence.md` govern the typed `ask-my-data` `mail-evidence` action. Step1 in the submissions skill resolves and reads that authority. The provider returns wrapper1 unchanged; do not import its private helpers, reinterpret a narrative answer as JSON, or hydrate an old search1 object in place.
+The installed Admin Google-access declaration `mailEvidenceContract: admin-mail-evidence-v1` and complete `skills/ask-my-data/references/mail-evidence.md` govern the typed `ask-my-data` `mail-evidence` action. Step1 in the submissions skill resolves and reads that authority. The provider returns a bounded receipt for its unchanged private wrapper1; do not import its private helpers, reinterpret a narrative answer as JSON, or hydrate an old search1 object in place.
 
-Source2 retains the same `source:"mail"`, `collections` and collection fields shown above, but sets the outer `schema_version` to2. Each collection's `evidence` is exactly the provider's wrapper1:
+The finite `submissions.py import-mail-artifacts` action accepts request1:
+
+```json
+{
+  "schema_version": 1,
+  "collections": [
+    {
+      "family": "cfpdev-proposal",
+      "scope": "actual query scope",
+      "observed_at": "2020-01-02T00:00:00Z",
+      "receipt": {
+        "schema_version": 1,
+        "artifact_id": "0123456789abcdef0123456789abcdef",
+        "bytes": 123,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      }
+    }
+  ]
+}
+```
+
+This example describes shape, not evidence. Use the actual provider receipt and
+actual collection metadata. `submission_artifacts.py` owns receipt admission,
+fixed-location descriptor traversal, byte/hash/attachment verification and
+cleanup through its `import_artifacts` contract and named constants. It accepts
+no caller path, root, role or credential. The same genuine Main container/UID
+must receive and consume the artifact; unavailable or changed inputs hold.
+The owner reads full wrapper1 without body stdout, constructs source2 in memory,
+and delegates to the unchanged pure adapter and one ledger publication only
+after every collection validates. No source2 reconstruction by the model is
+needed, and no private provider implementation is imported.
+
+Known success returns the ordinary import result plus `artifact_cleanup` and
+`artifacts_removed`. Rejected or unknown imports preserve inputs. Cleanup
+uncertainty stops further deletion and reports `preserved_uncertain`; inspect
+the original result and remaining evidence, never replay collection/import or
+recursively remove an artifact. These invocation files are ephemeral transport,
+not another ledger, source attestation or approval store.
+
+Source2 remains a supported decoded source format for the deterministic owner.
+It retains the same `source:"mail"`, `collections` and collection fields shown
+above, but sets the outer `schema_version` to2. Each collection's `evidence` is exactly the provider's wrapper1:
 
 ```json
 {

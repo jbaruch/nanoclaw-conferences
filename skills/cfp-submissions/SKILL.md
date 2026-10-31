@@ -33,7 +33,7 @@ Skill(skill: "ask-my-data")
 
 Resolve the declared `jbaruch/nanoclaw-admin` provider in the installed registry (native `/workspace/project/tessl-workspace/.tessl/plugins/jbaruch/nanoclaw-admin`; authoring `.tessl/plugins/jbaruch/nanoclaw-admin`). Read its manifest, declared `rules/google-access.md` with `mailEvidenceContract: admin-mail-evidence-v1`, complete `skills/admin-contracts/references/google-access.md` and `skills/ask-my-data/references/mail-evidence.md`. Missing, unsupported or unreadable authority holds mail collection; do not substitute a narrative answer or invent an installed action.
 
-Request the typed `mail-evidence` action with the actual query and optional limit/page_token JSON. The provider owns its fixed `collect-mail-evidence.py` invocation, maintained full-body hydration and unchanged JSON return. Follow the full reference rather than importing private helpers or reconstructing messages. Wrap the returned wrapper1 unchanged in the documented mail source2 collection. Preserve all search/thread/pagination/omission/error gaps even when a bound full body is complete. Legacy source1 remains accepted only with its unchanged search1 evidence. Never construct Main roles/env, read credentials, use direct Gmail HTTP or turn candidate search results into submission proof.
+Request the typed `mail-evidence` action with the actual query and optional limit/page_token JSON. The provider owns its fixed `collect-mail-evidence.py` invocation, maintained full-body hydration and bounded receipt return. Follow the full reference rather than importing private helpers or reconstructing messages. Keep its private artifact inside the same genuine Main container. Write the actual receipt and existing collection metadata to the request documented in `references/source-input.md`, then invoke the finite owner route below. Do not print or model-reconstruct the artifact body. Preserve all search/thread/pagination/omission/error gaps even when a bound full body is complete. Legacy source1 remains accepted only with its unchanged search1 evidence. Never construct Main roles/env, read credentials, use direct Gmail HTTP or turn candidate search results into submission proof.
 
 For Sessionize, resolve the declared `jbaruch/nanoclaw-host` provider through the normal project registry. Source authoring uses its actual `.tessl/plugins/jbaruch/nanoclaw-host` installation; genuine native Main reads the provider at `/workspace/project/tessl-workspace/.tessl/plugins/jbaruch/nanoclaw-host`. These are installed-provider locations, never caller path selectors or source-checkout substitutes.
 
@@ -41,7 +41,15 @@ Verify the provider manifest identity and declaration of `rules/sessionize-rende
 
 Use only actual Main and the existing signed-in My Events page. Missing, denied, changed or unsupported installed authority or capture holds visibly; it is never an empty import. Do not substitute endpoints, roles, targets or accounts, bypass held slots, navigate/edit/submit, or read forms/values/storage/cookies. Pass the returned source1 packet unchanged. The adapter verifies the observed account/filter/count/status/native-link structure; it does not authenticate a supplied capture or establish complete history.
 
-Write the documented source1 Sessionize or source2 mail packet to a private invocation file; no raw private capture or personal control link goes into public source/fixtures.
+For new mail collection, write only the documented receipt request to a private invocation file, then run:
+
+```bash
+python3 /home/node/.claude/skills/tessl__cfp-submissions/scripts/submissions.py import-mail-artifacts < /tmp/cfp-submission-mail-receipts.json
+```
+
+The owner validates every bound input before one ledger import, returning ordinary import metadata and cleanup outcomes. A rejected or uncertain import preserves evidence. A successful import with `artifact_cleanup:preserved_uncertain` requires inspection of remaining evidence; never replay collection/import or delete more inputs to conceal an uncertain cleanup. The receipt grants no source or Main authority.
+
+For Sessionize source1 or already collected legacy mail source1, write the documented packet to a private invocation file; no raw private capture or personal control link goes into public source/fixtures.
 
 ```bash
 python3 /home/node/.claude/skills/tessl__cfp-submissions/scripts/submissions.py import < /tmp/cfp-submission-source.json

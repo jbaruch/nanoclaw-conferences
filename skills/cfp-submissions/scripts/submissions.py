@@ -11,6 +11,11 @@ bind: {identity: <identity>, evidence_id, owner_binding: <binding1>}.
 import: source1 Sessionize/search-mail or source2 hydrated mail packet; all
         observations/coverage validate before one ledger commit. Result has
         recorded/changed/observations/identities_resolved/ledger_sha256.
+import-mail-artifacts: request1 collections of family/scope/observed_at/receipt1;
+        reads the fixed private Admin artifacts through submission_artifacts.py,
+        validates source2 and commits once without mail stdout. Known success
+        returns ordinary import metadata plus artifact_cleanup/artifacts_removed.
+        Any uncertain cleanup requires inspection, never import replay.
 reconcile: {identity: <identity>, slug: <existing exact CFP slug>}.
 sync: {}. Derived exact-reference CFP pass; reports each outcome, checked and
       final ledger hashes, generation_changed and complete (not collection
@@ -29,7 +34,7 @@ unsafe files, conflicts, unsupported captures and capacity failures HOLD.
 
 Exit 0 emits a result, including preserved reconciliation conflicts; exit 1
 holds retained state and names recovery. Unexpected implementation errors
-propagate. Only an absent ledger is initialized by record/manual/import.
+propagate. Only an absent ledger is initialized by record/manual/import or import-mail-artifacts.
 query/history/bind/reconcile/sync never initialize it. The scripts send
 nothing, create no provider objects and never advance heartbeat/cadence state.
 """
@@ -51,6 +56,7 @@ from datetime import date, datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from submission_artifacts import ArtifactHold, import_artifacts
 from submission_sources import SourceError, adapter_kind, material
 
 LEDGER = Path("/workspace/group/cfp-submissions.json")
@@ -948,7 +954,17 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "action",
-        choices=["record", "manual", "bind", "query", "history", "reconcile", "sync", "import"],
+        choices=[
+            "record",
+            "manual",
+            "bind",
+            "query",
+            "history",
+            "reconcile",
+            "sync",
+            "import",
+            "import-mail-artifacts",
+        ],
     )
     args = parser.parse_args(argv)
     try:
@@ -967,11 +983,18 @@ def main(argv=None):
             raise Hold(
                 "invalid_input_json; repair the documented JSON input before retrying"
             ) from None
-        if args.action == "import":
+        if args.action in {"import", "import-mail-artifacts"}:
             from submission_sources import prepare
 
-            observations, scopes = prepare(request)
-            result = record_many(LEDGER, observations, scopes)
+            def commit(source):
+                observations, scopes = prepare(source)
+                return record_many(LEDGER, observations, scopes)
+
+            result = (
+                import_artifacts(request, commit)
+                if args.action == "import-mail-artifacts"
+                else commit(request)
+            )
         elif args.action in {"record", "manual"}:
             result = record(LEDGER, request, manual=args.action == "manual")
         elif args.action in {"query", "history"}:
@@ -989,7 +1012,7 @@ def main(argv=None):
                 "query_capacity; narrow the query or inspect unresolved source evidence; "
                 "no absence is established"
             )
-    except (Hold, SourceError) as error:
+    except (Hold, SourceError, ArtifactHold) as error:
         print(f"cfp-submissions: {error}", file=sys.stderr)
         return 1
     except OSError:
