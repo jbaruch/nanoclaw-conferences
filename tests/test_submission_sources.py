@@ -2336,3 +2336,81 @@ def test_native_lowercase_svg_anchors_participate_in_identity_binding(
         nodes[index]["tag"] = "a"
         observations, scopes = source.prepare(dashboard)
         assert len(observations) == 51 and scopes[0]["complete"]
+
+
+@pytest.mark.parametrize("surface", ["event", "proposal"])
+@pytest.mark.parametrize("tag", ["A", "a"])
+def test_cross_family_projected_anchor_refuses_ambiguous_identity(modules, dashboard, surface, tag):
+    source, _ = modules
+    nodes = dashboard["capture"]["nodes"]
+    route = "/event/details/" if surface == "event" else "/session/"
+    index = next(i for i, node in enumerate(nodes) if route in node.get("href", ""))
+    competitor = {
+        **nodes[index],
+        "tag": tag,
+        "href": (
+            "https://sessionize.com/app/speaker/session/competing"
+            if surface == "event"
+            else "https://sessionize.com/app/speaker/event/details/999999"
+        ),
+    }
+    insertion = index + 1
+    for node in nodes[insertion:]:
+        if node["parent"] >= insertion:
+            node["parent"] += 1
+    nodes.insert(insertion, competitor)
+    with pytest.raises(source.SourceError, match="capture_.*_identity"):
+        source.prepare(dashboard)
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+def test_page_limit_without_processed_stub_outcome_is_not_native(modules, source_version):
+    source, _ = modules
+    packet = failed_stub_packet(source_version, 0, 0, [{"kind": "page_limit_exceeded"}])
+    with pytest.raises(source.SourceError, match="mail_search_coverage"):
+        source.prepare(packet)
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize("outcome", ["retained", "omitted", "invalid", "thread_failure"])
+def test_page_limit_with_each_native_processed_stub_outcome_is_supported(
+    modules, source_version, outcome
+):
+    source, _ = modules
+    errors = [{"kind": "page_limit_exceeded"}]
+    if outcome == "invalid":
+        errors.append({"kind": "invalid_thread_id"})
+    elif outcome == "thread_failure":
+        errors.append({"kind": "thread_unavailable", "thread_id": "a001"})
+    packet = failed_stub_packet(
+        source_version, int(outcome == "retained"), int(outcome == "omitted"), errors
+    )
+    observations, scopes = source.prepare(packet)
+    assert len(observations) == int(outcome == "retained")
+    assert not scopes[0]["complete"]
+
+
+def test_one_bounded_full_read_can_overflow_wrapper_after_json_escaping(modules):
+    source, _ = modules
+    packet = hydrated_mail()
+    wrapper = packet["collections"][0]["evidence"]
+    message = wrapper["search"]["threads"][0]["messages"][0]
+    message["body"] = '"' * 6000
+    full = wrapper["body_reads"][0]["evidence"]
+    full["body"] = '"' * 261000
+
+    def encode(value):
+        return json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode()
+
+    assert len(full["body"].encode()) <= 256 * 1024
+    assert len(encode(full)) <= 512 * 1024
+    assert len(encode(wrapper["search"])) <= 64 * 1024
+    assert len(encode(wrapper)) > 512 * 1024
+    wrapper.update(
+        body_reads=[],
+        body_reads_omitted=1,
+        complete=False,
+        errors=[{"message_id": message["messageId"], "kind": "aggregate_limit"}],
+    )
+    observations, scopes = source.prepare(packet)
+    assert not observations[0]["fact"]["complete"] and not scopes[0]["complete"]

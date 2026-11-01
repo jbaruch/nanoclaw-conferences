@@ -464,10 +464,9 @@ def sessionize(request):
             links = [
                 (nodes[i], native_path(nodes[i].get("href"), r"/app/speaker/event/details/(\d+)"))
                 for i in inside
-                if nodes[i]["tag"].upper() == "A"
+                if nodes[i]["tag"].upper() == "A" and "href" in nodes[i]
             ]
-            links = [(n, identifier) for n, identifier in links if identifier]
-            require(len(links) == 1, "capture_event_identity")
+            require(len(links) == 1 and links[0][1] is not None, "capture_event_identity")
             node, event_id = links[0]
             require(event_id not in seen_events, "capture_duplicate_event")
             seen_events.add(event_id)
@@ -500,10 +499,9 @@ def sessionize(request):
                 native_path(nodes[i].get("href"), r"/app/speaker/session/([A-Za-z0-9_-]{1,100})"),
             )
             for i in inside
-            if nodes[i]["tag"].upper() == "A"
+            if nodes[i]["tag"].upper() == "A" and "href" in nodes[i]
         ]
-        links = [(n, identifier) for n, identifier in links if identifier]
-        require(len(links) == 1, "capture_proposal_identity")
+        require(len(links) == 1 and links[0][1] is not None, "capture_proposal_identity")
         node, proposal = links[0]
         pair = (current["event_id"], proposal)
         require(pair not in seen, "capture_duplicate_proposal")
@@ -1004,6 +1002,10 @@ def mail_search(search):
     require(
         len(threads) + search["threads_omitted"] + invalid_stubs + failed <= MAX_MAIL_THREADS,
         "mail_threads",
+    )
+    require(
+        not page_limits or len(threads) + search["threads_omitted"] + invalid_stubs + failed > 0,
+        "mail_search_coverage",
     )
     require(not search["complete"] or not gap, "mail_search_coverage")
     return originals, pending
