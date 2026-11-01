@@ -697,6 +697,41 @@ def test_excluded_host_nodes_cannot_supply_submission_evidence(
     assert not ledger.exists()
 
 
+@pytest.mark.parametrize("surface", ["filter", "account", "status"])
+def test_every_host_anchor_requires_one_link_projection(modules, dashboard, surface):
+    source, _ = modules
+    nodes = dashboard["capture"]["nodes"]
+    if surface == "filter":
+        target = next(
+            node for node in nodes if node["text"] == "Current events" and node["tag"] == "A"
+        )
+    elif surface == "account":
+        target = next(node for node in nodes if "event-title" in node["classes"].split())
+    else:
+        target = next(node for node in nodes if "session-status_0" in node["classes"])
+    target["tag"] = "A"
+    target.pop("href", None)
+    target.pop("link_omitted", None)
+    with pytest.raises(source.SourceError, match="capture_node_link"):
+        source.prepare(dashboard)
+
+
+@pytest.mark.parametrize("surface", ["status", "event", "proposal"])
+def test_host_preorder_cannot_reopen_a_closed_subtree(modules, dashboard, surface):
+    source, _ = modules
+    nodes = dashboard["capture"]["nodes"]
+    if surface == "status":
+        target = next(node for node in nodes if "session-status_0" in node["classes"])
+    else:
+        route = "/event/details/" if surface == "event" else "/session/"
+        target = next(node for node in nodes if route in node.get("href", ""))
+    # Returning to BODY closes every intervening subtree. Its next native
+    # sibling cannot then claim the earlier table/row as its parent.
+    target["parent"] = 0
+    with pytest.raises(source.SourceError, match="capture_tree"):
+        source.prepare(dashboard)
+
+
 def test_host_svg_shape_and_omitted_link_metadata_remain_supported(modules, dashboard):
     source, _ = modules
     nodes = dashboard["capture"]["nodes"]
@@ -2059,3 +2094,83 @@ def test_omitted_malformed_message_can_coexist_with_a_complete_retained_template
     observations, scopes = source.prepare(packet)
     assert observations[0]["fact"]["status"] == "declined"
     assert not scopes[0]["complete"]
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+def test_native_mail_order_is_retained_without_chronological_reinterpretation(
+    modules, source_version
+):
+    source, _ = modules
+    # Exact output of the published Admin search owner with a synthetic native
+    # newer-first response. parse_thread preserves order; latest_thread_state
+    # independently chooses the newest date. No native sorting contract exists.
+    evidence = {
+        "schema_version": 1,
+        "threads": [
+            {
+                "thread_id": "aa",
+                "citation_url": "https://mail.google.com/mail/u/0/#all/aa",
+                "source_trust": "untrusted",
+                "messages": [
+                    {
+                        "messageId": "a1",
+                        "from": "speaker@example.invalid",
+                        "to": "owner@example.invalid",
+                        "subject": "Synthetic producer order proof",
+                        "internalDate": "2021-01-01T00:00:00+00:00",
+                        "labelIds": ["INBOX"],
+                        "body": "Synthetic bounded body",
+                        "body_complete": True,
+                    },
+                    {
+                        "messageId": "a2",
+                        "from": "speaker@example.invalid",
+                        "to": "owner@example.invalid",
+                        "subject": "Synthetic producer order proof",
+                        "internalDate": "2020-12-31T00:00:00+00:00",
+                        "labelIds": ["INBOX"],
+                        "body": "Synthetic bounded body",
+                        "body_complete": True,
+                    },
+                ],
+                "message_count": 2,
+                "complete": True,
+                "thread_latest_message_from": "them",
+                "thread_latest_message_id": "a1",
+                "thread_latest_message_date": "2021-01-01T00:00:00+00:00",
+                "messages_omitted": 0,
+            }
+        ],
+        "next_page_token": None,
+        "threads_omitted": 0,
+        "complete": True,
+        "errors": [],
+    }
+    if source_version == 2:
+        evidence = {
+            "schema_version": 1,
+            "search": evidence,
+            "body_reads": [],
+            "body_reads_omitted": 0,
+            "complete": True,
+            "errors": [],
+        }
+    packet = {
+        "schema_version": source_version,
+        "source": "mail",
+        "collections": [
+            {
+                "family": "sessionize-submission",
+                "scope": "synthetic",
+                "observed_at": "2021-01-02T00:00:00Z",
+                "evidence": evidence,
+            }
+        ],
+    }
+    observations, scopes = source.prepare(packet)
+    assert len(observations) == 2 and len(scopes) == 1
+    assert {row["fact"]["source_at"] for row in observations} == {
+        "2021-01-01T00:00:00+00:00",
+        "2020-12-31T00:00:00+00:00",
+    }
+    assert all(row["fact"]["status"] is None for row in observations)

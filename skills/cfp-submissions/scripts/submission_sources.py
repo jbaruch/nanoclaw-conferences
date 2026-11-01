@@ -157,7 +157,7 @@ def capture_node(node):
     require(
         ("link_omitted" not in node or node["link_omitted"] is True)
         and not ("href" in node and "link_omitted" in node)
-        and (not ({"href", "link_omitted"} & set(node)) or tag.upper() == "A"),
+        and len({"href", "link_omitted"} & set(node)) == (1 if tag.upper() == "A" else 0),
         "capture_node_link",
     )
 
@@ -391,6 +391,7 @@ def sessionize(request):
     nodes = list_value(capture.get("nodes"), "capture_bounds")
     require(1 <= len(nodes) <= MAX_NODES, "capture_bounds")
     children = [[] for _ in nodes]
+    ancestors = []
     for i, node in enumerate(nodes):
         capture_node(node)
         parent = node.get("parent")
@@ -400,7 +401,11 @@ def sessionize(request):
             "capture_tree",
         )
         if parent is not None:
+            while ancestors and ancestors[-1] != parent:
+                ancestors.pop()
+            require(bool(ancestors), "capture_tree")
             children[parent].append(i)
+        ancestors.append(i)
     # Host checks JSON.stringify(dom) before attaching its scope metadata.
     # Validated native values have no floating-point or unsupported string forms.
     native_dom = {key: value for key, value in capture.items() if key != "scope"}
