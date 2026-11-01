@@ -1,5 +1,9 @@
 # Changelog
 
+### Track evidenced conference submissions (#101)
+
+Add one private per-event/talk ledger with normalized/manual evidence, explicit owner bindings, unknown/conflicting-field retention and inclusive date-overlap queries. Reconcile exact existing CFPs to canonical `sent` through their existing expected-digest owner, preserving user actions, concurrent changes and all heartbeat/cadence state. Add bounded adapters for observed Sessionize My Events and maintained Gmail confirmation/decision structures, atomic whole-import validation, explicit no-mail owner records and exact-reference CFP synchronization. Waitlisted talks remain visible as possible conflicts; declined/withdrawn history stays queryable. Replayed identity-poor sources preserve explicit owner bindings. Real collection, exhaustive source coverage and native issue101 acceptance are not claimed.
+
 All notable changes to this plugin are documented here.
 
 ## 0.1.64 — 2026-10-31

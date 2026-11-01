@@ -1,0 +1,155 @@
+# Submission source inputs
+
+Owner: `cfp-submissions/scripts/submission_sources.py`, called by the co-shipped `submissions.py import` and receipt-backed `import-mail-artifacts` actions. One bounded JSON stdin packet, no network calls. The owner validates all proposed facts, all retained state and all coverage before one ledger publication. Raw captures are private invocation input, not another durable store. Do not retain complete messages, raw DOM, private edit URLs or credentials in the ledger.
+
+These adapters parse structures; they do not authenticate caller-supplied JSON, Main identity, a mailbox sender, a source clock or an owner message. Genuine collection remains with the installed Admin read owners and supported visible-browser owner. Runtime role/credential grants are unchanged. The schema reference is `skills/cfp-submissions/references/state-schema.md`, installed at `/home/node/.claude/skills/tessl__cfp-submissions/references/state-schema.md`.
+
+## Sessionize
+
+The installed `jbaruch/nanoclaw-host` rule `rules/sessionize-rendered-capture.md`
+and complete `skills/host-contracts/references/sessionize-rendered-capture.md`
+govern collection. Follow Step1's verified provider lookup in the submissions
+skill; its fixed no-argument capture owner returns this packet unchanged.
+Missing or held collection supplies no empty result or source-completeness proof.
+
+Exact outer fields:
+
+```json
+{
+  "schema_version": 1,
+  "source": "sessionize",
+  "observed_at": "2020-12-01T00:00:00.000Z",
+  "capture": {
+    "schema_version": 1,
+    "origin": "https://sessionize.com",
+    "path": "/app/speaker/events",
+    "title": "My events - Speaker profile @ Sessionize.com",
+    "nodes": [],
+    "scope": "Complete rendered node tree of the observed My Events view; forms, hidden content, credential/storage values and unsafe links excluded. Account/filter/history completeness remains unknown until consumer validation."
+  }
+}
+```
+
+The capture clock retains the Host producer's exact JavaScript `Date.toISOString()` millisecond-Z spelling; alternate precision, offsets and spellings hold before any observation or scope is created. The consumer validates the complete declared Host node shape before extracting any observation: required/allowed keys, native UTF-16 bounds, tag and link grammar, omitted-link booleans, mutually exclusive link fields and eligible normalized text. Producer-excluded elements and subtrees are rejected before extraction; the excluded tag set is owned by `submission_sources.py` (`SESSIONIZE_EXCLUDED_TAGS`), matching the maintained Host collector. Unsupported or unassigned Unicode text holds without rewriting it. These are syntax/content checks, not proof that supplied JSON came from the provider.
+
+`nodes` is the complete rendered DOM tree in depth-first preorder; a closed subtree cannot reopen. Every anchor retains exactly one projected or intentionally omitted link, and other elements carry neither link field. Class tokens use the native HTML whitespace grammar, and every collector-recognized anchor participates in identity checks, including lowercase SVG anchors. Parser limits are owned by `skills/cfp-submissions/scripts/submission_sources.py` — `MAX_CAPTURE_BYTES`, `MAX_NODES`, `MAX_MESSAGES`, `MAX_BODY`; the CLI input cap is `MAX_INPUT` in `skills/cfp-submissions/scripts/submissions.py`. The native DOM byte check follows the Host compact UTF-8 serialization before its returned scope metadata is attached. Each node has `tag`, `parent` (a preceding integer index, root null), `classes` and direct visible `text`; contained non-edit links may additionally have `href`. Values/attributes from forms, hidden DOM, storage, cookies, credential/profile exports and query/fragment-bearing links are excluded by the collector. `link_omitted:true` may describe an intentionally omitted link; its missing target supplies no identity.
+
+The captured account/filter, native event/proposal relationships, status recognition and explicit date grammar are owned by `skills/cfp-submissions/scripts/submission_sources.py` — `sessionize`, `native_path`, `STATUS` and `event_dates`. Supply the returned rendered tree unchanged; do not reconstruct rows or assign statuses in the model. The adapter returns native event/talk identities and preserves distinct same-title talks. Duplicate identities refuse.
+
+Unknown status labels remain null, with a scope gap; they never become submitted/accepted by default. Missing or unsupported date grammar remains null. Wrong route/filter/account/tree or unbound proposal links refuse the capture instead of initializing an empty ledger. Event/session count mismatches and pagination controls make scope coverage incomplete. Count agreement proves only the captured Current-events view, never past, declined, external events or full account history. The visible account marker is fingerprinted in private scope metadata, not authentication or a fabricated stable provider account ID.
+
+List dates are event-owned Sessionize observations; city, co-speakers and submitted date are absent in the captured list and stay null. A displayed talk time/room is not an event city or submission time. The capture clock is `observed_at`; it never becomes `source_at`. The adapter's content-bound IDs omit that clock. Identical recaptures retain one fact and refresh its actual last-seen time monotonically. Current snapshot ordering is restricted to this same verified adapter/native event/proposal identity; a tied contradiction or conflict with an incomparable other source remains a conflict. Prior snapshots remain in history. A current event-official observation can resolve dates/city separately through the normalized record action.
+
+## Maintained mail evidence
+
+Exact outer fields:
+
+```json
+{
+  "schema_version": 1,
+  "source": "mail",
+  "collections": [
+    {
+      "family": "pretalx",
+      "scope": "the actual bounded search/filter/window",
+      "observed_at": "2020-12-01T00:00:00Z",
+      "evidence": {
+        "schema_version": 1,
+        "threads": [],
+        "next_page_token": null,
+        "threads_omitted": 0,
+        "complete": true,
+        "errors": []
+      }
+    }
+  ]
+}
+```
+
+This source1 format is retained unchanged for previously collected search1 evidence and is the only format accepted by the public `import` action. New full-hydration collection uses the receipt-backed action below; source2 is constructed internally, never accepted as raw CLI stdin.
+
+`evidence` is the maintained Admin search-mail schema1 envelope. Preserve each thread's `messages`, `complete`, `messages_omitted`; each message's actual `messageId`, `subject`, bound `internalDate`, complete sanitized `body` and `body_complete`. Keep every owner-returned nested field unchanged in the private packet. The `mail_search` validator checks the complete published thread/message/error shapes, native identities, citation/trust binding, counts, latest-message metadata and coverage relationships before any import. Latest-message metadata must remain feasible within the retained ties, their directions and actual omitted-message count; an omitted unique latest message retains its native identity. An undated pending message requires the producer's binding-change error before hydration. Thread completeness must match its retained malformed/body/date/omission causes; a unique latest message has a known direction even when omitted. A retained malformed-payload error requires either an omitted message or an actual empty incomplete retained body with empty From/To/Subject, matching the producer's invalid-payload replacement; a complete template body alone cannot explain that error. Every native message ID, including an omitted latest-message ID, must keep the same thread across collections. A continuation search may remain globally incomplete without a local thread gap. The aggregate stub budget includes retained threads, byte-cap omissions, invalid IDs and distinct failed lookups. Page errors retain the producer's bounded ordering and terminal-token relationships. A malformed payload that parsed successfully and was later byte-cap omitted uses its omission slot; a payload error followed by a parser failure uses one failed slot. Parsed malformed-thread errors retain their producer order: retained threads precede byte-cap omissions, which can remove only a suffix. The Admin collector preserves the native message-array order without sorting; latest-message metadata is computed independently from dates. Hydration reads and errors follow the original incomplete-message order; aggregate-limit omissions remove only a suffix of successful body reads, preserving independent fetch failures. Native message and latest-message timestamps must retain the producer's exact UTC `datetime.isoformat()` serialization from integer milliseconds (`+00:00`, with native fractional precision); alternate spellings are not normalized. Validation never fabricates metadata to make an input pass. A full-body helper without its identity-matched search date is insufficient; never substitute collection time. No continuation token or error text is copied into coverage: only finite gaps are retained. Collection and message limits are owned by the named script constants and the `mail` input validator. Split at actual collection boundaries without calling an incomplete scope complete.
+
+
+### Full-body handoff: mail source2
+
+The installed Admin Google-access declaration `mailEvidenceContract: admin-mail-evidence-v1` and complete `skills/ask-my-data/references/mail-evidence.md` govern the typed `ask-my-data` `mail-evidence` action. Step1 in the submissions skill resolves and reads that authority. The provider returns a bounded receipt for its unchanged private wrapper1; do not import its private helpers, reinterpret a narrative answer as JSON, or hydrate an old search1 object in place.
+
+The finite `submissions.py import-mail-artifacts` action accepts request1:
+
+```json
+{
+  "schema_version": 1,
+  "collections": [
+    {
+      "family": "cfpdev-proposal",
+      "scope": "actual query scope",
+      "observed_at": "2020-01-02T00:00:00Z",
+      "receipt": {
+        "schema_version": 1,
+        "artifact_id": "0123456789abcdef0123456789abcdef",
+        "bytes": 123,
+        "sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      }
+    }
+  ]
+}
+```
+
+This example describes shape, not evidence. Use the actual provider receipt and
+actual collection metadata. `submission_artifacts.py` owns receipt admission,
+fixed-location descriptor traversal, byte/hash/attachment verification and
+cleanup through its `import_artifacts` contract and named constants. It accepts
+no caller path, root, role or credential. The same genuine Main container/UID
+must receive and consume the artifact; unavailable or changed inputs hold.
+The owner reads full wrapper1 without body stdout, constructs source2 in memory,
+and delegates to the unchanged pure adapter and one ledger publication only
+after every collection validates. No source2 reconstruction by the model is
+needed, and no private provider implementation is imported.
+
+Known success returns the ordinary import result plus `artifact_cleanup` and
+`artifacts_removed`. Rejected or unknown imports preserve inputs. Cleanup
+uncertainty stops further deletion and reports `preserved_uncertain`; inspect
+the original result and remaining evidence, never replay collection/import or
+recursively remove an artifact. These invocation files are ephemeral transport,
+not another ledger, source attestation or approval store.
+
+Source2 remains a supported decoded source format for the deterministic owner.
+It retains the same `source:"mail"`, `collections` and collection fields shown
+above, but sets the outer `schema_version` to2. Each collection's `evidence` is exactly the provider's wrapper1:
+
+```json
+{
+  "schema_version": 1,
+  "search": {
+    "schema_version": 1,
+    "threads": [],
+    "next_page_token": null,
+    "threads_omitted": 0,
+    "complete": true,
+    "errors": []
+  },
+  "body_reads": [],
+  "body_reads_omitted": 0,
+  "complete": true,
+  "errors": []
+}
+```
+
+Each body read carries `message_id`, `thread_id`, `internalDate` and `evidence` (the unchanged fetch-mail-body1 result). The source owner `submission_sources.py` — `mail_handoff`, its named mail bounds/error constants and `mail` — validates the complete wrapper, original incomplete-message membership, unique native bindings, unchanged fetch shape, bounded bytes and omission/error accounting before the ledger owner can commit. Unsupported versions, contradictory bindings or malformed aggregate coverage hold the entire import; an earlier valid collection cannot partially commit.
+
+Only a provider-bound complete body can supply complete per-message content evidence. Its subject must exactly match the search observation before hydration; a changed subject holds the whole import without a ledger write. Headers must already have the producer's canonical Unicode, invisible-character, repeat-run and whitespace form; validation never cleans an unsupported header into a claim. Sanitized headers retain the producer's truncation marker, including a cut at a space boundary; a cut subject supplies no parsed submission claim. Bodies are already sanitized plain text from the Admin producer. Validate that output form and match the exact emitted text; never parse it again as HTML, remove intervening URLs, or collapse whitespace to manufacture a template. Literal markup and URLs remain evidence, while a URL inside a parsed claim leaves that claim unknown. A partial prefix may retain its cut boundary space. The original search object remains unchanged, including prefixes and every search/thread/body/pagination/omission/error gap. Hydration never repairs query coverage or supplies a collection-clock message date. Failed/oversized/missing or incomplete body reads retain their explicit gaps. Source1 is not retagged, and neither input format changes ledger1. JSON validation supplies no runtime Main identity, source authentication or native acceptance.
+
+`family` selects one of the source adapter's `FAMILIES` inputs; it supplies no authentication or claim by itself. Recognized template fields and unsupported cases are owned by `skills/cfp-submissions/scripts/submission_sources.py` — `mail_fields`, `oxford_claim` and `own_form_claim`. Preserve the source owner output; do not preclassify ambiguous prose or create a guessed proposal identity. Recognized confirmations/decisions produce cited claims; unmatched templates retain unknown status. Available historical mail date/city claims remain in facts and do not certify current event dates/city. Multiple generic confirmations are observations, not identified talk counts.
+
+All current mail observations lack a verified native event/proposal pair and enter the unresolved map, with native mail ID citations and source clocks. URLs, HTML attributes, abstracts and unrelated mail contents never enter projected fields. Clipped bodies cannot contribute positive resolved fields. Search/thread/body incompleteness, unsupported templates and missing proposal identities remain coverage gaps. Every occurrence is parsed and contributes its own query-scope gaps before deduplication. Fixed observed template predicates recognize content independently of the query-family label. Identical native messages found in several families become one observation with compatible parsed fields and the latest actual collection clock within that packet, independent of collection ordering. Conflicting content or parser fields refuse the complete import; a family tag alone never grants a claim. Across repeated imports the same native message/content retains one fact and advances its last-seen clock monotonically, preserving any explicit owner binding. Mail resolution still uses actual `source_at`; collection time supplies no mail precedence or distinct-submission proof.
+
+## Owner/manual and CFP projection
+
+Systems without mail use the existing `manual` action, not an invented parser or sender-based owner grant. Ground each event/talk pair in the actual explicit owner note and assign stable note-based identities; preserve stated co-speakers and unknown submitted date. Event-date prose in an owner note remains a claim until current event-owned evidence resolves it. No owner note is copied into public fixtures.
+
+After a record/import/binding, run `sync` with `{}`. It uses only an already evidenced exact public CFP reference that uniquely matches an existing CFP, then delegates to the unchanged expected-digest committer. No similar-title/year join, new CFP creation, source-history reset or `user_actioned` override occurs. Missing references and conflicts remain explicit; the evidence ledger stays committed if the derived projection cannot complete. `complete` in this result describes that derived pass, never exhaustive source collection. An unconfirmed guarded owner attempt aborts the pass before any later owner call and exits nonzero. Earlier writes may already exist; preserve them and inspect actual CFP state before any retry. Proven pre-commit refusals remain per-item incomplete results.
+
+## Source fixture/provenance boundary
+
+`tests/submission_fixture_builders.py` constructs fresh synthetic structural transcriptions of the observed tree/templates for each test. Original captures and source-to-fixture hashes/transformation notes remain in a private operator artifact. Public fixture people, events, titles, IDs, dates and links are replacements; originals, bearers and unrelated prose are excluded. Those offline tests prove parser behavior, not fresh account access, exhaustive history or native issue101 acceptance. Root owns real collection, installed-byte verification and acceptance.
