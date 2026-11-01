@@ -424,9 +424,9 @@ def sessionize(request):
         return result
 
     def classes(index):
-        return set(nodes[index]["classes"].split())
+        return set(re.findall(r"[^\t\n\f\r ]+", nodes[index]["classes"]))
 
-    account = [n["text"] for n in nodes if "event-title" in n["classes"].split() and n["text"]]
+    account = [n["text"] for i, n in enumerate(nodes) if "event-title" in classes(i) and n["text"]]
     require(len(account) == 1, "capture_account")
     active = [
         i
@@ -449,7 +449,7 @@ def sessionize(request):
     gaps, observations, event_count, current, seen = [], [], 0, None, set()
     seen_events = set()
     account_scope = f"visible-account-sha256:{sha(account[0])}; Current events; /app/speaker/events"
-    if any("pagination" in n["classes"].split() for n in nodes):
+    if any("pagination" in classes(i) for i in range(len(nodes))):
         gaps.append("pagination controls present; additional pages not verified")
 
     def finish_event():
@@ -464,7 +464,7 @@ def sessionize(request):
             links = [
                 (nodes[i], native_path(nodes[i].get("href"), r"/app/speaker/event/details/(\d+)"))
                 for i in inside
-                if nodes[i]["tag"] == "A"
+                if nodes[i]["tag"].upper() == "A"
             ]
             links = [(n, identifier) for n, identifier in links if identifier]
             require(len(links) == 1, "capture_event_identity")
@@ -500,7 +500,7 @@ def sessionize(request):
                 native_path(nodes[i].get("href"), r"/app/speaker/session/([A-Za-z0-9_-]{1,100})"),
             )
             for i in inside
-            if nodes[i]["tag"] == "A"
+            if nodes[i]["tag"].upper() == "A"
         ]
         links = [(n, identifier) for n, identifier in links if identifier]
         require(len(links) == 1, "capture_proposal_identity")

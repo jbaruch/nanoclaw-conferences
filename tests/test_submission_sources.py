@@ -2264,3 +2264,75 @@ def test_undated_hydration_omission_requires_the_native_binding_error(modules, k
     else:
         observations, scopes = source.prepare(packet)
         assert len(observations) == 1 and not scopes[0]["complete"]
+
+
+@pytest.mark.parametrize("separator", ["\u00a0", "\u2003", "\u0085", "\v"])
+@pytest.mark.parametrize("surface", ["account", "filter", "event", "status", "pagination"])
+def test_raw_class_tokens_use_only_html_ascii_whitespace(modules, dashboard, separator, surface):
+    source, _ = modules
+    nodes = dashboard["capture"]["nodes"]
+    if surface == "pagination":
+        nodes.append(
+            {
+                "tag": "DIV",
+                "parent": 0,
+                "classes": "pagination" + separator + "extra",
+                "text": "More",
+            }
+        )
+    elif surface == "account":
+        target = next(n for n in nodes if "event-title" in n["classes"].split())
+        target["classes"] = "event-title" + separator + "extra"
+    elif surface == "filter":
+        target = next(
+            n
+            for i, n in enumerate(nodes)
+            if n["tag"] == "LI"
+            and "active" in n["classes"].split()
+            and any(child["parent"] == i and child["text"] == "Current events" for child in nodes)
+        )
+        target["classes"] = "active" + separator + "extra"
+    elif surface == "event":
+        target = next(n for n in nodes if n["tag"] == "TR" and "event" in n["classes"].split())
+        target["classes"] = "event" + separator + "gray-bg"
+    else:
+        target = next(n for n in nodes if "session-status_0" in n["classes"].split())
+        target["classes"] = "badge" + separator + "session-status_0"
+    if surface in {"account", "filter", "event"}:
+        with pytest.raises(source.SourceError):
+            source.prepare(dashboard)
+    else:
+        observations, scopes = source.prepare(dashboard)
+        if surface == "status":
+            assert observations[0]["fact"]["status"] is None and not scopes[0]["complete"]
+        else:
+            assert len(observations) == 51 and scopes[0]["complete"]
+
+
+@pytest.mark.parametrize("surface", ["event", "proposal"])
+@pytest.mark.parametrize("competing", [False, True])
+def test_native_lowercase_svg_anchors_participate_in_identity_binding(
+    modules, dashboard, surface, competing
+):
+    source, _ = modules
+    nodes = dashboard["capture"]["nodes"]
+    route = "/event/details/" if surface == "event" else "/session/"
+    index = next(i for i, n in enumerate(nodes) if route in n.get("href", ""))
+    if competing:
+        duplicate = {**nodes[index], "tag": "a"}
+        duplicate["href"] = (
+            "https://sessionize.com/app/speaker/event/details/999999"
+            if surface == "event"
+            else "https://sessionize.com/app/speaker/session/competing"
+        )
+        insertion = index + 1
+        for node in nodes[insertion:]:
+            if node["parent"] >= insertion:
+                node["parent"] += 1
+        nodes.insert(insertion, duplicate)
+        with pytest.raises(source.SourceError, match="capture_.*_identity"):
+            source.prepare(dashboard)
+    else:
+        nodes[index]["tag"] = "a"
+        observations, scopes = source.prepare(dashboard)
+        assert len(observations) == 51 and scopes[0]["complete"]
