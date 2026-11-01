@@ -655,6 +655,48 @@ def test_complete_host_node_shape_is_required(modules, dashboard, damage):
         source.prepare(dashboard)
 
 
+@pytest.mark.parametrize(
+    "tag",
+    [
+        "SCRIPT",
+        "STYLE",
+        "NOSCRIPT",
+        "FORM",
+        "INPUT",
+        "TEXTAREA",
+        "SELECT",
+        "OPTION",
+        "IFRAME",
+        "OBJECT",
+        "EMBED",
+    ],
+)
+@pytest.mark.parametrize("surface", ["event", "proposal", "date", "count", "status"])
+def test_excluded_host_nodes_cannot_supply_submission_evidence(
+    modules, dashboard, tmp_path, tag, surface
+):
+    source, owner = modules
+    nodes = dashboard["capture"]["nodes"]
+    if surface in {"event", "proposal"}:
+        route = "/event/details/" if surface == "event" else "/session/"
+        anchor = next(node for node in nodes if route in node.get("href", ""))
+        # The entire subtree, including its valid identity link, would be absent
+        # from the Host capture when its parent is excluded.
+        target = nodes[anchor["parent"]]
+    elif surface == "date":
+        target = next(node for node in nodes if node["text"] == "2 Nov - 4 Nov 2020")
+    elif surface == "count":
+        target = next(node for node in nodes if node["text"] == "(16)")
+    else:
+        target = next(node for node in nodes if "session-status_0" in node["classes"])
+    target["tag"] = tag.lower() if surface == "date" else tag
+    ledger = tmp_path / "ledger"
+    with pytest.raises(source.SourceError, match="capture_node_tag"):
+        observations, scopes = source.prepare(dashboard)
+        owner.record_many(ledger, observations, scopes)
+    assert not ledger.exists()
+
+
 def test_host_svg_shape_and_omitted_link_metadata_remain_supported(modules, dashboard):
     source, _ = modules
     nodes = dashboard["capture"]["nodes"]

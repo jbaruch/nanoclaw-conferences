@@ -26,6 +26,23 @@ import unicodedata
 from datetime import date, datetime, timedelta
 from urllib.parse import urlsplit
 
+# Fixed exclusion set in the published Host sessionize-capture.mjs producer.
+# It omits these elements and their complete subtrees before serialization.
+SESSIONIZE_EXCLUDED_TAGS = frozenset(
+    {
+        "SCRIPT",
+        "STYLE",
+        "NOSCRIPT",
+        "FORM",
+        "INPUT",
+        "TEXTAREA",
+        "SELECT",
+        "OPTION",
+        "IFRAME",
+        "OBJECT",
+        "EMBED",
+    }
+)
 MAX_NODES = 12000
 MAX_CAPTURE_BYTES = 1_500_000
 SESSIONIZE_SCOPE = (
@@ -118,6 +135,7 @@ def capture_node(node):
     )
     tag = native_string(node["tag"], 20)
     require(re.fullmatch(r"[A-Za-z][A-Za-z0-9-]{0,19}", tag), "capture_node_tag")
+    require(tag.upper() not in SESSIONIZE_EXCLUDED_TAGS, "capture_node_tag")
     native_string(node["classes"], 1000)
     value = native_string(node["text"], 16000)
     require(
