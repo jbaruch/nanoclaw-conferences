@@ -1244,6 +1244,7 @@ def test_search1_valid_retained_latest_metadata_and_unknowns(modules, metadata):
             thread_latest_message_date=None,
             thread_latest_message_from="unknown",
         )
+        wrapper["errors"][0]["kind"] = "binding_changed"
     observations, scopes = source.prepare(packet)
     assert observations and not any(item["complete"] for item in scopes)
 
@@ -2174,3 +2175,92 @@ def test_native_mail_order_is_retained_without_chronological_reinterpretation(
         "2020-12-31T00:00:00+00:00",
     }
     assert all(row["fact"]["status"] is None for row in observations)
+
+
+@pytest.mark.parametrize("source_version", [1, 2])
+@pytest.mark.parametrize(
+    "case,held",
+    [
+        ("unique_unknown", True),
+        ("unique_null_id", True),
+        ("outside_id_retained_tie", True),
+        ("id_with_retained_tie", True),
+        ("wrong_tie_direction", True),
+        ("unknown_tie", False),
+        ("two_omitted_tie", False),
+        ("same_direction_tie", False),
+        ("unique_omitted", False),
+    ],
+)
+def test_omitted_latest_metadata_has_a_possible_native_witness(modules, source_version, case, held):
+    source, _ = modules
+    packet = hydrated_mail(missing=True)
+    wrapper = packet["collections"][0]["evidence"]
+    thread = wrapper["search"]["threads"][0]
+    thread.update(
+        message_count=2,
+        messages_omitted=1,
+        thread_latest_message_date="2020-11-02T00:00:00+00:00",
+        thread_latest_message_id=None,
+        thread_latest_message_from="unknown",
+    )
+    if case == "unique_null_id":
+        thread["thread_latest_message_from"] = "them"
+    elif case in {
+        "outside_id_retained_tie",
+        "id_with_retained_tie",
+        "wrong_tie_direction",
+        "unknown_tie",
+        "same_direction_tie",
+    }:
+        thread["thread_latest_message_date"] = thread["messages"][0]["internalDate"]
+        if case == "outside_id_retained_tie":
+            thread.update(thread_latest_message_id="a002", thread_latest_message_from="them")
+        elif case == "id_with_retained_tie":
+            other = deepcopy(thread["messages"][0])
+            other.update(messageId="a003", body="Synthetic complete body", body_complete=True)
+            thread["messages"].append(other)
+            thread.update(
+                message_count=3, thread_latest_message_id="a001", thread_latest_message_from="them"
+            )
+        elif case == "wrong_tie_direction":
+            thread["messages"][0]["labelIds"] = ["SENT"]
+            thread["thread_latest_message_from"] = "them"
+        elif case == "same_direction_tie":
+            thread["thread_latest_message_from"] = "them"
+    elif case == "two_omitted_tie":
+        thread.update(message_count=3, messages_omitted=2)
+    elif case == "unique_omitted":
+        thread.update(thread_latest_message_id="a002", thread_latest_message_from="them")
+    packet["schema_version"] = source_version
+    if source_version == 1:
+        packet["collections"][0]["evidence"] = wrapper["search"]
+    if held:
+        with pytest.raises(source.SourceError, match="mail_latest_metadata"):
+            source.prepare(packet)
+    else:
+        observations, scopes = source.prepare(packet)
+        assert len(observations) == len(thread["messages"]) and not scopes[0]["complete"]
+
+
+@pytest.mark.parametrize(
+    "kind", ["body_unavailable", "body_too_large", "aggregate_limit", "binding_changed"]
+)
+def test_undated_hydration_omission_requires_the_native_binding_error(modules, kind):
+    source, _ = modules
+    packet = hydrated_mail(missing=True)
+    wrapper = packet["collections"][0]["evidence"]
+    thread = wrapper["search"]["threads"][0]
+    thread["messages"][0]["internalDate"] = None
+    thread.update(
+        thread_latest_message_id=None,
+        thread_latest_message_date=None,
+        thread_latest_message_from="unknown",
+    )
+    wrapper["errors"][0]["kind"] = kind
+    if kind != "binding_changed":
+        with pytest.raises(source.SourceError, match="mail_handoff_coverage"):
+            source.prepare(packet)
+    else:
+        observations, scopes = source.prepare(packet)
+        assert len(observations) == 1 and not scopes[0]["complete"]

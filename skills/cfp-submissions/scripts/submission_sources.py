@@ -921,15 +921,24 @@ def mail_search(search):
                 and all(item[0] <= latest for item in dated),
                 "mail_latest_metadata",
             )
-            if not thread["messages_omitted"]:
-                newest = max(item[0] for item in dated)
-                tied = [item for item in dated if item[0] == newest]
+            tied = [item for item in dated if item[0] == latest]
+            omitted = thread["messages_omitted"]
+            if latest_id is None:
+                # A null native latest ID requires at least two tied messages.
+                # Omitted rows may supply missing witnesses, never unlimited ones.
+                require(len(tied) + omitted >= 2, "mail_latest_metadata")
                 directions = {item[2] for item in tied}
+                if direction == "unknown":
+                    require(
+                        len(directions) > 1 or omitted >= 1 and bool(tied) or omitted >= 2,
+                        "mail_latest_metadata",
+                    )
+                else:
+                    require(directions <= {direction}, "mail_latest_metadata")
+            else:
+                # A known latest ID is unique, including against omitted rows.
                 require(
-                    latest == newest
-                    and latest_id == (tied[0][1] if len(tied) == 1 else None)
-                    and direction
-                    == (next(iter(directions)) if len(directions) == 1 else "unknown"),
+                    len(tied) <= 1 and (not tied or tied[0][1] == latest_id),
                     "mail_latest_metadata",
                 )
         if undated:
@@ -1097,7 +1106,12 @@ def mail_handoff(wrapper):
     require(
         set(errors) == omitted | partial
         and all(errors[mid] == "body_incomplete" for mid in partial)
-        and all(errors[mid] != "body_incomplete" for mid in omitted),
+        and all(errors[mid] != "body_incomplete" for mid in omitted)
+        and all(
+            original["internalDate"] is not None or errors[mid] == "binding_changed"
+            for mid, (_, original) in pending.items()
+            if mid in omitted
+        ),
         "mail_handoff_coverage",
     )
     require(
