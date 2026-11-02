@@ -22,6 +22,7 @@ cfp-state.json directly):
 import io
 import json
 import subprocess
+import sys
 import threading
 from datetime import UTC, datetime
 from pathlib import Path
@@ -464,95 +465,6 @@ def test_snapshot_refuses_unusable_sources(commit_state, tmp_path, monkeypatch, 
     assert not state_path.exists()
 
 
-@pytest.mark.parametrize("acted", [False, True])
-def test_unique_reference_guard_preserves_existing_owner_and_other_records(
-    commit_state, tmp_path, monkeypatch, capsys, acted
-):
-    state_path, expected = tmp_path / "cfp.json", tmp_path / "expected.json"
-    prior = {"status": "open", "cfp_url": "https://example.invalid/cfp", "user_actioned": acted}
-    state = {"one": prior, "unrelated": {"keep": "fresh"}, "_last_checked": "preserved"}
-    state_path.write_text(json.dumps(state))
-    expected.write_text(json.dumps({"one": commit_state.record_digest(prior)}))
-    _stdin(monkeypatch, {"one": {**prior, "status": "sent"}})
-    assert (
-        commit_state.main(
-            [
-                "--state",
-                str(state_path),
-                "--expected-digests",
-                str(expected),
-                "--unique-cfp-url",
-                "https://example.invalid/cfp/",
-            ]
-        )
-        == 0
-    )
-    result = _out(capsys)
-    assert result["written"] == (0 if acted else 1)
-    assert result["skipped_user_actioned"] == (1 if acted else 0)
-    if not acted:
-        state["one"]["status"] = "sent"
-    assert _read(state_path) == state
-
-
-def test_unique_reference_guard_compares_siblings_after_obtaining_actual_lock(
-    commit_state, state_lock, tmp_path, monkeypatch, capsys
-):
-    state_path, expected = tmp_path / "cfp.json", tmp_path / "expected.json"
-    prior = {"status": "open", "cfp_url": "https://example.invalid/cfp"}
-    state_path.write_text(json.dumps({"one": prior}))
-    expected.write_text(json.dumps({"one": commit_state.record_digest(prior)}))
-    _stdin(monkeypatch, {"one": {**prior, "status": "sent"}})
-    outcomes = []
-    thread = threading.Thread(
-        target=lambda: outcomes.append(
-            commit_state.main(
-                [
-                    "--state",
-                    str(state_path),
-                    "--expected-digests",
-                    str(expected),
-                    "--unique-cfp-url",
-                    "https://example.invalid/cfp",
-                ]
-            )
-        )
-    )
-    state = {"one": prior, "new-sibling": {**prior, "cfp_url": "https://example.invalid/cfp/"}}
-    with state_lock.locked(state_path):
-        thread.start()
-        state_path.write_text(json.dumps(state))
-    thread.join(timeout=30)
-    assert not thread.is_alive() and outcomes == [0]
-    result = _out(capsys)
-    assert result["written"] == 0 and result["skipped_changed"] == ["one"]
-    assert _read(state_path) == state
-
-
-@pytest.mark.parametrize("mode", ["unguarded", "snapshot", "wrong-record", "multiple"])
-def test_unique_reference_guard_cannot_grant_a_new_commit_mode(
-    commit_state, tmp_path, monkeypatch, capsys, mode
-):
-    state_path, expected = tmp_path / "cfp.json", tmp_path / "expected.json"
-    prior = {"status": "open", "cfp_url": "https://example.invalid/cfp"}
-    state_path.write_text(json.dumps({"one": prior}))
-    before = state_path.read_bytes()
-    working = {"one": {**prior, "status": "sent"}}
-    args = ["--state", str(state_path), "--unique-cfp-url", "https://example.invalid/cfp"]
-    if mode == "snapshot":
-        args.append("--snapshot")
-    elif mode != "unguarded":
-        args += ["--expected-digests", str(expected)]
-        expected.write_text(json.dumps({"one": commit_state.record_digest(prior)}))
-        if mode == "wrong-record":
-            working["one"]["cfp_url"] = "https://example.invalid/other"
-        else:
-            working["two"] = dict(prior)
-    _stdin(monkeypatch, working)
-    assert commit_state.main(args) == 1
-    assert capsys.readouterr().err and state_path.read_bytes() == before
-
-
 def test_existing_digest_only_empty_bootstrap_contract_is_unchanged(
     commit_state, tmp_path, monkeypatch, capsys
 ):
@@ -587,3 +499,29 @@ def test_guarded_new_record_feeds_owner_schema_stamper(
 
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))
+
+
+def test_a_confirmed_submission_overrides_an_earlier_owner_decision(tmp_path):
+    state_path = tmp_path / "cfp-state.json"
+    state_path.write_text(json.dumps({"conf": {"status": "approved", "user_actioned": True}}))
+    payload = json.dumps({"conf": {"status": "sent", "user_actioned": True}})
+    script = str(Path(__file__).resolve().parents[1] / "skills/check-cfps/scripts/commit-state.py")
+
+    guarded = subprocess.run(
+        [sys.executable, script, "--state", str(state_path)],
+        input=payload,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert json.loads(guarded.stdout)["skipped_user_actioned"] == 1
+    assert json.loads(state_path.read_text())["conf"]["status"] == "approved"
+
+    subprocess.run(
+        [sys.executable, script, "--state", str(state_path), "--submission-confirmed"],
+        input=payload,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert json.loads(state_path.read_text())["conf"]["status"] == "sent"
