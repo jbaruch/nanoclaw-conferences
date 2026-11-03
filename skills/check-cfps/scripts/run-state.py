@@ -65,7 +65,7 @@ def write_json(path: Path, payload) -> None:
             os.fsync(handle.fileno())
         os.chmod(tmp, 0o644)
         os.replace(tmp, path)
-    except BaseException:
+    except Exception:
         Path(tmp).unlink(missing_ok=True)
         raise
 
