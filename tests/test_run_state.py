@@ -408,5 +408,27 @@ def test_write_failure_exits_1(run_state, monkeypatch, capsys):
     assert "disk full" in captured.err
 
 
+def test_a_save_after_midnight_keeps_the_run_it_belongs_to(run_state, monkeypatch, capsys):
+    """Review on 8f7a5373: a run that crosses 00:00 UTC must not lose the
+    stages it completed before midnight."""
+    module, run_dir = run_state
+    _freeze(module, monkeypatch, datetime(2026, 6, 15, 23, 50, tzinfo=UTC))
+    module.main(["begin"])
+    for stage in ("fetch", "candidates"):
+        _stdin(monkeypatch, {"stage": stage})
+        module.main(["save", stage])
+    _freeze(module, monkeypatch, datetime(2026, 6, 16, 0, 5, tzinfo=UTC))
+    _stdin(monkeypatch, {"stage": "working_set"})
+    assert module.main(["save", "working_set"]) == 0
+    assert _manifest(run_dir) == {
+        "run_date": "2026-06-15",
+        "completed": ["fetch", "candidates", "working_set"],
+    }
+    capsys.readouterr()
+    assert module.main(["begin"]) == 0
+    assert _out(capsys)["resume"] is False
+    assert not (run_dir / "fetch.json").exists()
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-q"]))

@@ -14,8 +14,9 @@ Commands (JSON on stdout):
   begin               Resume a run begun today: {"resume": true, "run_date",
                       "completed"}. Anything else (no manifest, another day,
                       unreadable) starts fresh: {"resume": false, ...}.
-  save <stage>        Store stdin JSON as <stage>.json, mark it completed:
-                      {"saved": stage}.
+  save <stage>        Store stdin JSON as <stage>.json and mark it completed in
+                      the run's manifest, keeping that run's date: {"saved":
+                      stage}.
   load <stage>        Print the saved artifact; exit 2 when there is none.
   invalidate <stage>...
                       Drop the named stages and every stage completed after
@@ -69,20 +70,27 @@ def write_json(path: Path, payload) -> None:
         raise
 
 
-def manifest(directory: Path) -> dict | None:
-    """Today's manifest, or None when there is no usable run to resume."""
+def stored(directory: Path) -> dict | None:
+    """The manifest on disk, whatever its day, or None when it is missing or
+    malformed."""
     try:
         data = json.loads((directory / MANIFEST).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     if (
         isinstance(data, dict)
-        and data.get("run_date") == today()
+        and isinstance(data.get("run_date"), str)
         and isinstance(data.get("completed"), list)
         and all(isinstance(s, str) and STAGE_RE.match(s) for s in data["completed"])
     ):
         return {"run_date": data["run_date"], "completed": data["completed"]}
     return None
+
+
+def manifest(directory: Path) -> dict | None:
+    """Today's manifest, or None when there is no run of today to resume."""
+    current = stored(directory)
+    return current if current is not None and current["run_date"] == today() else None
 
 
 def clear(directory: Path) -> None:
@@ -114,7 +122,9 @@ def save(directory: Path, stage: str, raw: str) -> dict:
         artifact = json.loads(raw)
     except ValueError as exc:
         raise BadInput(f"stage {stage!r} stdin is not valid JSON: {exc}") from None
-    current = manifest(directory) or {"run_date": today(), "completed": []}
+    # A run that crosses midnight keeps its own date and stages; `begin`
+    # decides whether to resume it.
+    current = stored(directory) or {"run_date": today(), "completed": []}
     write_json(directory / f"{stage}.json", artifact)
     if stage not in current["completed"]:
         current["completed"].append(stage)
@@ -139,7 +149,7 @@ def load(directory: Path, stage: str) -> str | None:
 
 def invalidate(directory: Path, stages: list[str]) -> dict:
     targets = list(dict.fromkeys(stage_name(s) for s in stages))
-    current = manifest(directory)
+    current = stored(directory)
     if current is not None:
         hits = [i for i, s in enumerate(current["completed"]) if s in targets]
         if hits:
