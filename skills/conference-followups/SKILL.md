@@ -14,7 +14,7 @@ Process steps in order. Do not skip ahead. Main only. Nothing is sent without Ba
 
 ## Step 1 — Ground the list
 
-From Baruch's message or voice transcript, take the conference (name and the date it started) and each person with what they talked about. Use only what he said: no invented people, addresses, promises or meetings. If the conference, its date or a person is unclear, ask him one question and finish here. Proceed immediately to Step 2.
+From Baruch's message or voice transcript, take the conference (name and the date it started) and each person with what they talked about. Use only what he said: no invented people, addresses, promises or meetings. If the conference, its date or a person is unclear, ask him one question and finish here. Otherwise proceed immediately to Step 2.
 
 ## Step 2 — Find each address
 
@@ -23,7 +23,7 @@ From Baruch's message or voice transcript, take the conference (name and the dat
 - Never build an address from a name, an employer's domain or someone else's profile.
 - Ask him about an ambiguous match.
 
-People without an address stay unsent; list them at the end. With nobody left to write to, go to Step 4. Proceed immediately to Step 3.
+People without an address stay unsent; list them at the end. With nobody left to write to, go to Step 4; otherwise proceed immediately to Step 3.
 
 ## Step 3 — Draft and post one card per person
 
@@ -44,4 +44,4 @@ The host refuses a card whose text differs from the payload, more than one recip
 
 ## Step 4 — Offer calendar holds
 
-Only for a meeting the list actually agreed, with a known time and duration: ask Baruch with one `owner.answer.v1` card whether to hold it («Поставить» / «Не надо»). On «Поставить», follow `## Requested calendar event` in the admin plugin's `skills/heartbeat/references/google-main-writes.md`. No agreed meeting, no hold. Finish here.
+Only for a meeting the list actually agreed, with a known time and duration: ask Baruch with one `owner.answer.v1` card whether to hold it («Поставить» / «Не надо»). On «Поставить», read `skills/heartbeat/references/google-main-writes.md` from the admin plugin at `/home/node/.claude/skills/tessl__heartbeat/references/google-main-writes.md` and follow its `## Requested calendar event`. No agreed meeting, no hold. Finish here.
