@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Mark CFPs from submission confirmation mail: status sent, mail archived.
 
-Reads the last 30 days of confirmations through the OneCLI gateway, which holds
-the Google credential. A matched CFP gets `status: sent`, `user_actioned: true`
-and its talk titles through check-cfps' commit-state.py. Then the mail leaves the
-inbox. Mail with no matching CFP stays in the inbox and is reported.
+Reads confirmations from the last 30 days that are still in the inbox, through
+the OneCLI gateway, which holds the Google credential. A matched CFP gets
+`status: sent`, `user_actioned: true` and its talk titles through check-cfps'
+commit-state.py; a CFP already sent gains any new talk title. Then the mail leaves
+the inbox, so no confirmation is read twice. Mail with no matching CFP stays in the
+inbox and is reported. An Oxford Abstracts confirmation counts only when its
+subject names OCX.
 
 No arguments. Exit 0 prints {"marked": [slugs], "archived": N, "unmatched": [senders]}.
 Exit 1: Gmail or state failure, with the cause on stderr; nothing further runs.
@@ -51,7 +54,9 @@ def gmail(method: str, path: str, *, params: dict | None = None, body: dict | No
 def confirmations(api: Callable[..., dict]) -> list[dict]:
     found = {}
     for query in QUERIES:
-        listed = api("GET", "/messages", params={"q": f"{query} newer_than:30d", "maxResults": 100})
+        listed = api(
+            "GET", "/messages", params={"q": f"{query} in:inbox newer_than:30d", "maxResults": 100}
+        )
         for row in listed.get("messages", []):
             if row["id"] in found:
                 continue
@@ -65,7 +70,6 @@ def confirmations(api: Callable[..., dict]) -> list[dict]:
                 "id": row["id"],
                 "from": headers.get("from", ""),
                 "subject": headers.get("subject", ""),
-                "inbox": "INBOX" in raw.get("labelIds", []),
             }
     return list(found.values())
 
@@ -103,7 +107,7 @@ def resolve(mail: dict, records: dict) -> tuple[str | None, str | None, dict | N
             records, lambda _, record: "socallinuxexpo.org" in str(record.get("cfp_url") or "")
         )
         return known, title, None
-    if "oxfordabstracts.com" in sender:
+    if "oxfordabstracts.com" in sender and "ocx" in subject.lower():
         known = _latest(
             records,
             lambda key, record: "ocx" in key.lower() or "ocx" in str(record.get("name")).lower(),
@@ -120,15 +124,13 @@ def plan(mails: list[dict], records: dict, today: str) -> tuple[dict, list[dict]
     for mail in mails:
         slug, title, created = resolve(mail, records)
         if slug is None:
-            if mail["inbox"]:
-                unmatched.append(mail["from"])
+            unmatched.append(mail["from"])
             continue
-        if mail["inbox"]:
-            archive.append(mail)
+        archive.append(mail)
         record = updates.get(slug) or created or records[slug]
-        if record.get("status") == "sent" and slug not in updates:
-            continue
         talks = set(record.get("submitted_talks", []))
+        if record.get("status") == "sent" and (not title or title in talks):
+            continue
         if title:
             talks.add(title)
         updates[slug] = {

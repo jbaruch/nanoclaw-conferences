@@ -70,9 +70,9 @@ class Gmail:
             return {}
         if path == "/messages":
             query = params["q"]
-            assert query.endswith("newer_than:30d")
+            assert query.endswith(" in:inbox newer_than:30d")
             domain = query.split()[0].removeprefix("from:")
-            hits = [m for m in self.mails if domain in m["from"]]
+            hits = [m for m in self.mails if domain in m["from"] and "INBOX" in m["labels"]]
             return {"messages": [{"id": m["id"]} for m in hits]}
         mail = next(m for m in self.mails if m["id"] == path.rsplit("/", 1)[-1])
         return {
@@ -153,17 +153,57 @@ def test_oxford_abstracts_matches_by_conference_name(owner):
     assert saved(owner, "ocx-2027")["submitted_talks"] == []
 
 
-def test_an_already_sent_event_is_not_rewritten_but_its_mail_still_leaves_the_inbox(owner):
+def test_a_sent_event_gains_a_later_talk_title(owner):
+    state = json.loads(owner.STATE.read_text())
+    state["already"]["submitted_talks"] = ["Talk A"]
+    owner.STATE.write_text(json.dumps(state))
+    api = Gmail([mail("e1", "already@events.sessionize.com", "Talk B")])
+    assert owner.run(api, TODAY) == {"marked": ["already"], "archived": 1, "unmatched": []}
+    assert saved(owner, "already")["submitted_talks"] == ["Talk A", "Talk B"]
+
+
+def test_a_sent_event_with_that_title_is_not_rewritten_but_its_mail_leaves_the_inbox(owner):
+    state = json.loads(owner.STATE.read_text())
+    state["already"]["submitted_talks"] = ["Talk A"]
+    owner.STATE.write_text(json.dumps(state))
     before = saved(owner, "already")
-    api = Gmail([mail("e1", "already@events.sessionize.com", "A Talk")])
+    api = Gmail([mail("e1", "already@events.sessionize.com", "Talk A")])
     assert owner.run(api, TODAY) == {"marked": [], "archived": 1, "unmatched": []}
     assert saved(owner, "already") == before
 
 
-def test_mail_already_archived_is_not_archived_again(owner):
-    api = Gmail([mail("f1", "devsum-2027@events.sessionize.com", "A Talk", labels=("IMPORTANT",))])
-    assert owner.run(api, TODAY) == {"marked": ["devsum-2027"], "archived": 0, "unmatched": []}
-    assert api.archived == []
+def test_archived_mail_is_never_read_again(owner):
+    # Last night's confirmation, already archived, must not land on a newer edition.
+    api = Gmail(
+        [
+            mail(
+                "f1",
+                "info@socallinuxexpo.org",
+                "Your session proposal has been received: Old Talk",
+                labels=("IMPORTANT",),
+            )
+        ]
+    )
+    assert owner.run(api, TODAY) == {"marked": [], "archived": 0, "unmatched": []}
+    assert saved(owner, "southern-california-linux-expo-scale-24x-2027")["status"] == "open"
+
+
+def test_an_oxford_abstracts_confirmation_for_another_conference_is_not_ocx(owner):
+    api = Gmail(
+        [
+            mail(
+                "f2",
+                "no-reply@oxfordabstracts.com",
+                "RSE26 - Thank you for submitting your proposal",
+            )
+        ]
+    )
+    assert owner.run(api, TODAY) == {
+        "marked": [],
+        "archived": 0,
+        "unmatched": ["no-reply@oxfordabstracts.com"],
+    }
+    assert saved(owner, "ocx-2027")["status"] == "open"
 
 
 def test_a_confirmation_with_no_matching_cfp_stays_in_the_inbox_and_is_reported(owner):
