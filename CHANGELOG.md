@@ -1,5 +1,7 @@
 # Changelog
 
+## 0.2.2 — 2026-11-03
+
 ### Simplify the check-cfps run-state store (jbaruch/nanoclaw#1256)
 
 `run-state.py` keeps the same five commands and outputs: a same-day continuation still resumes from its saved stages (#4). The schema-2 manifest version, its v1 upgrade path and the reserved-name repair are gone. A store that lives for one UTC day and is always safe to rebuild starts fresh on anything it can't use. An existing manifest still resumes, because its old `schema_version` field is ignored.
