@@ -28,7 +28,7 @@ DECLARED = re.compile(r"^/home/node/\.claude/skills/tessl__[a-z0-9-]+/scripts/[A
 
 def _authored_scope() -> list[Path]:
     files: list[Path] = []
-    for skill in ("check-cfps", "nightly-cfp-sync", "conference-followups", "cfp-submissions"):
+    for skill in ("check-cfps", "nightly-cfp-sync", "cfp-submissions"):
         files.append(REPO_ROOT / "skills" / skill / "SKILL.md")
         files.extend(sorted((REPO_ROOT / "skills" / skill / "references").glob("*.md")))
     return [f for f in files if f.exists()]
@@ -75,10 +75,12 @@ def test_every_mount_path_names_a_shipped_skill_script_or_explicit_reference():
         assert target.is_file(), f"{source.relative_to(REPO_ROOT)}: {tail} has no co-shipped file"
 
 
-def test_the_rule_lists_every_shipped_skill():
+def test_the_rule_lists_every_shipped_skill_with_scripts():
     manifest = json.loads((REPO_ROOT / ".tessl-plugin" / "plugin.json").read_text(encoding="utf-8"))
     rule = (REPO_ROOT / "rules" / "nanoclaw-skill-root.md").read_text(encoding="utf-8")
-    for skill in manifest["skills"]:
+    scripted = [s for s in manifest["skills"] if (REPO_ROOT / s / "scripts").is_dir()]
+    assert scripted
+    for skill in scripted:
         assert f"`{Path(skill).name}`" in rule
 
 

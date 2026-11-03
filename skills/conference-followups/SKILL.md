@@ -1,162 +1,47 @@
 ---
 name: conference-followups
 description: >
-  Prepare post-conference follow-ups from an owner's free-text people list or
-  voice transcript. Resolve contacts, humanize one email per person, show
-  complete drafts with Send/Cancel/Edit choices, and offer explicitly requested
-  calendar holds. Use for "follow up with people I met", "conference contacts",
-  or a post-event list of names and conversation notes.
+  Follow up with people Baruch met at a conference: from his list of names and
+  conversation notes (text or voice), find each person's real address, draft one
+  short email each in his voice, and post each as a one-tap «Отправить» card;
+  offer a calendar hold only where a meeting was actually agreed. Use for
+  "follow up with people I met", "conference contacts", or a post-event list.
 ---
 
 # Conference Follow-ups
 
-Process steps in order. Do not skip ahead.
+Process steps in order. Do not skip ahead. Main only. Nothing is sent without Baruch's tap.
 
-## Step 1 — Ground the intake
+## Step 1 — Ground the list
 
-- Use the actual owner's main-chat text or supplied voice transcript.
-- Resolve the exact conference name and actual start date from owner context or an actual event record.
-- Preserve message identities, source quotes and the evidence used to resolve the date.
-- Clarify an unknown date before drafting.
-- Never substitute an arbitrary event id.
-- Extract people and conversation notes by meaning.
-- Do not infer an unheard transcript, invented email, conversation or meeting agreement.
-- Clarify missing event or ambiguous people.
-- Read the complete intake contract at `/home/node/.claude/skills/tessl__conference-followups/references/intake.md` (repository source):
+From Baruch's message or voice transcript, take the conference (name and the date it started) and each person with what they talked about. Use only what he said: no invented people, addresses, promises or meetings. If the conference, its date or a person is unclear, ask him one question and finish here. Proceed immediately to Step 2.
 
-```text
-skills/conference-followups/references/intake.md
-```
+## Step 2 — Find each address
 
-- Remove any old `/tmp/conference-intake.json`.
-- Write the current grounded schema-1 intake there with the native file-writing tool.
-- Require its successful native Write acknowledgement before invoking the validator.
-- On a missing or failed Write acknowledgement, remove that input.
-- Stop on a missing or failed Write acknowledgement.
-- Validate the fresh input with cleanup on success or failure:
+- An address he gave comes first.
+- Otherwise look for earlier mail with that person through `Skill(skill: "tessl__ask-my-data")`, or read the conference's Sessionize speaker profile.
+- Never build an address from a name, an employer's domain or someone else's profile.
+- Ask him about an ambiguous match.
 
-```bash
-set -euo pipefail
-cleanup_conference_intake() {
-  if ! rm -f -- /tmp/conference-intake.json; then
-    printf '%s\n' 'Conference private input cleanup failed; remove /tmp/conference-intake.json before continuing.' >&2
-  fi
-  return 0
-}
-trap cleanup_conference_intake EXIT
-chmod 600 /tmp/conference-intake.json
-python3 /home/node/.claude/skills/tessl__conference-followups/scripts/prepare-intake.py < /tmp/conference-intake.json
-```
+People without an address stay unsent; list them at the end. With nobody left to write to, go to Step 4. Proceed immediately to Step 3.
 
-- Require successful output before drafting.
-- Stop if private input cleanup failed.
-- Resume only after its actual cleanup succeeds.
-- Proceed immediately to Step 2.
+## Step 3 — Draft and post one card per person
 
-## Step 2 — Resolve the contacts
+Draft one short plain-text email per person: the conference, what you talked about, and the follow-up they agreed to, nothing more. Run it through `Skill(skill: "tessl__blog-writer")` to make it sound like Baruch, keeping its language and facts.
 
-- Use an explicitly provided address first.
-- For a missing address, invoke `Skill(skill: "tessl__ask-my-data")` for sanitized earlier mail evidence, or read the event's actual Sessionize speaker profile.
-- Preserve source ids and links.
-- Explain ambiguous matches to the owner.
-- Never derive an address from a name, employer domain or another person's profile.
-- Unresolved people remain unsent.
-- Continue resolved people without fabricating missing contacts.
-- Read `mcp__nanoclaw__conference_followup_status` for the resolved actual conference start date/name and recipients.
-- Require its schema-1 metadata to match the requested occurrence and recipients.
-- Treat it as historical host-log data, never provider freshness or permission.
-- Omit previously confirmed contacts.
-- Leave uncertain attempts unsent for host readback recovery.
-- Report a missing or failed native status reader before presenting Send choices.
-- If no eligible recipient remains, report unresolved, already-confirmed and uncertain contacts.
-- With no eligible recipient, proceed directly to Step 6 only for an independent calendar-hold request; otherwise finish here without building a card.
-- Proceed immediately to Step 3 only when at least one eligible recipient remains.
-
-## Step 3 — Humanize the drafts
-
-- Draft one concise plain-text email per resolved person naming the event and their actual conversation.
-- Include no promised meeting, attachment or other effect absent from intake.
-- Invoke `Skill(skill: "tessl__blog-writer")` on its scoped humanization route before presenting any draft.
-- Preserve language and the complete draft.
-- Read the complete callback contract at `/home/node/.claude/skills/tessl__conference-followups/references/callback-contract.md` (repository source):
+Post each with `mcp__nanoclaw__send_message`. The text is exactly the host's template, with one button:
 
 ```text
-skills/conference-followups/references/callback-contract.md
+✉️ Письмо для <address>
+Тема: <subject>
+
+<body>
 ```
 
-- Remove any old `/tmp/conference-drafts.json`.
-- Write the current schema-1 builder input defined by that contract there with the native file-writing tool.
-- Require its successful native Write acknowledgement before invoking the builder.
-- On a missing or failed Write acknowledgement, remove that input.
-- Stop on a missing or failed Write acknowledgement.
-- Build the cards with cleanup on success or failure:
+`buttons: [[{"label": "Отправить", "action": "gmail.send.v1", "payload": {"schema_version": 1, "to": "<address>", "subject": "<subject>", "body": "<body>"}}]]`
 
-```bash
-set -euo pipefail
-cleanup_conference_drafts() {
-  if ! rm -f -- /tmp/conference-drafts.json; then
-    printf '%s\n' 'Conference private input cleanup failed; remove /tmp/conference-drafts.json before continuing.' >&2
-  fi
-  return 0
-}
-trap cleanup_conference_drafts EXIT
-chmod 600 /tmp/conference-drafts.json
-python3 /home/node/.claude/skills/tessl__conference-followups/scripts/build-card.py < /tmp/conference-drafts.json
-```
-- Stop if private input cleanup failed.
-- Resume only after its actual cleanup succeeds.
-- Proceed immediately to Step 4.
+The host refuses a card whose text differs from the payload, more than one recipient, or a display name; fix what it names and post again. The host sends on his tap, whenever it comes, and edits the card with the result. To change a draft, post a new card. Proceed immediately to Step 4.
 
-## Step 4 — Present the held choices
+## Step 4 — Offer calendar holds
 
-- Send each builder-produced literal `text` with its complete `buttons` through `mcp__nanoclaw__send_message` in main, without sender override.
-- Preserve each actual delivery receipt.
-- All refers only to that card.
-- Never imply approval of unseen pages.
-- The host privately holds these drafts and alone releases the selected mail after an actual configured-owner claim.
-- Do not invoke a direct Gmail writer.
-- Never manufacture an approval field.
-- Preserve refused buttons and existing ASK policies.
-
-- An explicit pre-send refusal leaves the batch unsent.
-- Report the missing published consumer or dedicated gateway route identified by that result.
-- An uncertain card delivery requires inspection of its original message before any resend.
-- Proceed immediately to Step 5 when a real owner decision arrives.
-- Otherwise finish here with the drafts held.
-
-## Step 5 — Resolve the outcome
-
-- Use the actual host-bound decision and mirrored card result.
-- Send/Cancel are handled by the private host consumer.
-- Do not repeat a send from chat text.
-- For Edit, retain the exact selected original draft.
-- Apply the owner's actual correction.
-- Return to Step 3 for new complete content and fresh approval.
-- For an ordinary typed edit or cancellation, verify actual owner identity.
-- Resolve its exact original card and items.
-- Never simulate a callback.
-- Report cancellation only after the host confirms it.
-- Report unsupported typed effect routing.
-- Preserve the actual host hold state.
-
-- Describe success only from confirmed host/provider state.
-- A pending, interrupted or uncertain send is not resent, even under a new batch id.
-- Consult the native contacted-log reader before claiming a new round.
-- Never replace that authority with an agent-written contact ledger.
-- For an owner request to check an uncertain delivery, call `mcp__nanoclaw__conference_followup_reconcile` with its exact conference date/name and up to three explicit recipients.
-- Report only its versioned confirmation or unconfirmed diagnostic.
-- This operation checks the original attempt.
-- Never create a message or resend it through recovery.
-- Missing or unsupported native recovery leaves the attempt uncertain and closed.
-- Never substitute a Send card for recovery.
-- Proceed immediately to Step 6.
-
-## Step 6 — Offer calendar holds
-
-- If the intake actually agreed a meeting, offer a separate finite owner choice using `owner.answer.v1`, under the installed owner-answer contract.
-- Resolve timezone, exact time, duration and attendees before proposing a hold.
-- Only an explicit actual owner request permits `google-calendar-write.py insert` under `Skill(skill: "tessl__admin-contracts")` and its Google main-write workflow.
-- Preserve its stable request id and confirmed event receipt.
-- `sendUpdates=none` does not prove an invitation.
-- No agreement or no exact requested time means no calendar write.
-- Finish here.
+Only for a meeting the list actually agreed, with a known time and duration: ask Baruch with one `owner.answer.v1` card whether to hold it («Поставить» / «Не надо»). On «Поставить», follow `## Requested calendar event` in the admin plugin's `skills/heartbeat/references/google-main-writes.md`. No agreed meeting, no hold. Finish here.
