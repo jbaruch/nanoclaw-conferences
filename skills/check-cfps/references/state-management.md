@@ -58,11 +58,9 @@ Every CFP record carries its own `schema_version` (currently `1`, introduced wit
 - **Other readers** (`dedup-by-url.py`, `system-audit.py`): operate on version-independent structural fields (`cfp_url`/slug dedup, script inventory), not the `matched_interests` shape, so this version does not gate them.
 - **Migration window:** a pre-#308 file has no `schema_version` on any record; until `check-cfps` next runs (nightly housekeeping or a manual invocation) the reader surfaces no CFPs. `check-cfps`'s deterministic stamper brings every record to `1` on its next run, after which the reader resumes. No data rewrite beyond the stamp is needed — absent `matched_interests` on a version-1 record is already the pinned default.
 
-## Submission-derived `sent` projection
+## Submitted CFPs
 
-`cfp-submissions` delegates its derived update to this same `scripts/commit-state.py` owner with `--expected-digests FILE --unique-cfp-url URL`. The latter is an optional refusal-only guard, requiring guarded mode and exactly one proposed slug with that reference. Inside the existing advisory lock, exactly that slug must be the sole non-config record whose `cfp_url` equals the supplied reference (ignoring trailing slashes only). A newly added duplicate sibling returns `skipped_changed`, not a write. Fresh `user_actioned` and expected per-record digests retain their existing priority; unrelated records and metadata survive.
-
-If the derived guard refuses with no writes after the file disappeared, it preserves absence rather than initializing `{}`. All callers that omit `--unique-cfp-url` retain their original bootstrap, replacement and output behavior. No new store, nested lock, enum, record schema or mutation authority is introduced. An ambiguous reference needs explicit owner resolution, never a title-based join or direct file rewrite.
+`nightly-cfp-sync/scripts/mark-submitted.py` turns confirmation mail into `status: sent`, `user_actioned: true` and `submitted_talks`, a list of talk titles, through `commit-state.py`. To answer "what did we submit for these dates?", read the `sent` records and their `conf_date`. The mail is the proof: a submission with no confirmation mail is marked by hand as above.
 
 ## Freshness heartbeat — `_last_checked`
 

@@ -28,6 +28,14 @@ date -u +%Y-%m-%dT%H:%M:%SZ
 
 Hold this value as the run-start. Step 2 passes it to the cursor gate as `--since`, so capture it before invoking check-cfps below.
 
+Then mark what the owner already submitted, so the brief stops listing it:
+
+```bash
+python3 /home/node/.claude/skills/tessl__nightly-cfp-sync/scripts/mark-submitted.py
+```
+
+The script's docstring owns its output. On a nonzero exit or a nonempty `unmatched`, send one short notice with the stderr or the senders, then continue.
+
 `Skill(skill: "tessl__check-cfps", args: "scheduled")` — refresh open CFP data, apply Sessionize verification, update `cfp-state.json` using the inner skill's scheduled mode.
 
 Keep scheduled mode active through the entire inner invocation, including resume and fallback paths. Do not add web research before or after it. Complete Step 2's cursor write in this invocation; never defer it to a later turn.
