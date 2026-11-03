@@ -48,7 +48,6 @@ def test_begin_fresh_creates_manifest(run_state, capsys):
     assert out["resume"] is False
     assert out["completed"] == []
     manifest = _manifest(run_dir)
-    assert manifest["schema_version"] == module.SCHEMA_VERSION
     assert manifest["completed"] == []
     assert manifest["run_date"] == out["run_date"]
 
@@ -143,118 +142,6 @@ def test_begin_resets_on_corrupt_manifest(run_state, capsys):
     assert _manifest(run_dir)["completed"] == []
 
 
-def test_begin_resets_on_unsupported_schema_version(run_state, monkeypatch, capsys):
-    module, run_dir = run_state
-    day = datetime(2026, 6, 15, 9, 0, 0, tzinfo=UTC)
-    _freeze(module, monkeypatch, day)
-    run_dir.mkdir(parents=True, exist_ok=True)
-    # A future shape on today's date must NOT resume — the reader does not
-    # migrate; it treats an unsupported version as no usable prior run.
-    (run_dir / "manifest.json").write_text(
-        json.dumps({"schema_version": 999, "run_date": "2026-06-15", "completed": ["fetch"]}),
-        encoding="utf-8",
-    )
-
-    rc = module.main(["begin"])
-    out = _out(capsys)
-
-    assert rc == 0
-    assert out["resume"] is False
-    assert out["completed"] == []
-    assert _manifest(run_dir)["schema_version"] == module.SCHEMA_VERSION
-
-
-def test_begin_upgrades_a_prior_schema_version_in_place(run_state, monkeypatch, capsys):
-    """The owner migrates: a v1 manifest on TODAY's date is detected,
-    upgraded, and rewritten — the run survives with its `run_date` intact.
-    The v1 `fetch` artifact predates `sources`/`feed_failure`
-    (jbaruch/nanoclaw-conferences#78), so that stage and everything after it
-    is dropped and its file removed."""
-    module, run_dir = run_state
-    day = datetime(2026, 6, 15, 9, 0, 0, tzinfo=UTC)
-    _freeze(module, monkeypatch, day)
-    run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "manifest.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "run_date": "2026-06-15",
-                "completed": ["fetch", "candidates"],
-            }
-        ),
-        encoding="utf-8",
-    )
-    for stage in ("fetch", "candidates"):
-        (run_dir / f"{stage}.json").write_text(json.dumps({"stage": stage}), encoding="utf-8")
-
-    rc = module.main(["begin"])
-    out = _out(capsys)
-
-    assert rc == 0
-    # Upgraded, not reset: the run continues under its own run_date.
-    assert out["resume"] is True
-    assert out["run_date"] == "2026-06-15"
-    assert out["completed"] == []
-    manifest = _manifest(run_dir)
-    assert manifest["schema_version"] == module.SCHEMA_VERSION
-    assert manifest["run_date"] == "2026-06-15"
-    assert manifest["completed"] == []
-    # `candidates` derives from `fetch`, so the truncation cascades.
-    assert not (run_dir / "fetch.json").exists()
-    assert not (run_dir / "candidates.json").exists()
-
-
-def test_begin_upgrade_keeps_stages_untouched_by_the_shape_change(run_state, monkeypatch, capsys):
-    """A v1 manifest that never saved `fetch` loses nothing: the upgrade
-    invalidates only what the shape change actually affects."""
-    module, run_dir = run_state
-    day = datetime(2026, 6, 15, 9, 0, 0, tzinfo=UTC)
-    _freeze(module, monkeypatch, day)
-    run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "manifest.json").write_text(
-        json.dumps({"schema_version": 1, "run_date": "2026-06-15", "completed": ["candidates"]}),
-        encoding="utf-8",
-    )
-    (run_dir / "candidates.json").write_text(json.dumps({"pool": []}), encoding="utf-8")
-
-    rc = module.main(["begin"])
-    out = _out(capsys)
-
-    assert rc == 0
-    assert out["resume"] is True
-    assert out["completed"] == ["candidates"]
-    assert _manifest(run_dir)["schema_version"] == module.SCHEMA_VERSION
-    assert (run_dir / "candidates.json").exists()
-
-
-def test_begin_rejects_a_non_integer_schema_version(run_state, monkeypatch, capsys):
-    """`True == 1` and `2.0 == 2` in Python, so a bare equality test would let
-    `true` enter the v1 upgrade path (preserving completed stages) and `2.0`
-    pass as current. Both are malformed manifests and must reset."""
-    module, run_dir = run_state
-    day = datetime(2026, 6, 15, 9, 0, 0, tzinfo=UTC)
-    _freeze(module, monkeypatch, day)
-    run_dir.mkdir(parents=True, exist_ok=True)
-
-    for bogus in (True, float(module.SCHEMA_VERSION), "2"):
-        (run_dir / "manifest.json").write_text(
-            json.dumps(
-                {"schema_version": bogus, "run_date": "2026-06-15", "completed": ["candidates"]}
-            ),
-            encoding="utf-8",
-        )
-        (run_dir / "candidates.json").write_text(json.dumps({"pool": []}), encoding="utf-8")
-
-        rc = module.main(["begin"])
-        out = _out(capsys)
-
-        assert rc == 0, bogus
-        assert out["resume"] is False, bogus
-        assert out["completed"] == [], bogus
-        assert _manifest(run_dir)["schema_version"] == module.SCHEMA_VERSION, bogus
-        assert not (run_dir / "candidates.json").exists(), bogus
-
-
 def test_load_absent_stage_exits_2(run_state, capsys):
     module, _ = run_state
     module.main(["begin"])
@@ -327,54 +214,20 @@ def test_reserved_stage_keeps_store_unchanged(run_state, monkeypatch, capsys, co
     assert {path.name: path.read_bytes() for path in run_dir.iterdir()} == before
 
 
-def test_upgrade_reserved_stage_preserves_manifest(run_state, monkeypatch, capsys):
-    module, run_dir = run_state
-    _freeze(module, monkeypatch, datetime(2026, 6, 15, 9, tzinfo=UTC))
-    run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "manifest.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "run_date": "2026-06-15",
-                "completed": ["fetch", "manifest", "candidates"],
-            }
-        ),
-        encoding="utf-8",
-    )
-    for stage in ("fetch", "candidates"):
-        (run_dir / f"{stage}.json").write_text("{}", encoding="utf-8")
-
-    assert module.main(["begin"]) == 0
-    assert _out(capsys)["resume"] is True
-    assert _manifest(run_dir) == {
-        "schema_version": 2,
-        "run_date": "2026-06-15",
-        "completed": [],
-    }
-    assert {path.name for path in run_dir.iterdir()} == {"manifest.json"}
-    assert module.main(["begin"]) == 0
-    assert _out(capsys)["resume"] is True
-
-
-def test_current_manifest_repairs_reserved_checkpoint(run_state, monkeypatch, capsys):
+def test_a_tampered_manifest_starts_fresh(run_state, monkeypatch, capsys):
     module, run_dir = run_state
     _freeze(module, monkeypatch, datetime(2026, 6, 15, 9, tzinfo=UTC))
     module.main(["begin"])
-    for stage in ("fetch", "candidates"):
-        _stdin(monkeypatch, {"stage": stage})
-        module.main(["save", stage])
+    _stdin(monkeypatch, {"stage": "fetch"})
+    module.main(["save", "fetch"])
     manifest = _manifest(run_dir)
-    manifest["completed"] = ["fetch", "manifest", "candidates"]
+    manifest["completed"] = ["fetch", "manifest"]
     (run_dir / "manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
     capsys.readouterr()
 
     assert module.main(["begin"]) == 0
-    assert _out(capsys)["completed"] == ["fetch"]
-    assert _manifest(run_dir)["completed"] == ["fetch"]
-    assert (run_dir / "fetch.json").exists()
-    assert not (run_dir / "candidates.json").exists()
-    assert module.main(["load", "fetch"]) == 0
-    assert json.loads(capsys.readouterr().out) == {"stage": "fetch"}
+    assert _out(capsys)["resume"] is False
+    assert not (run_dir / "fetch.json").exists()
 
 
 def test_save_non_json_exits_1(run_state, monkeypatch, capsys):
@@ -458,9 +311,8 @@ def test_invalidate_cascades_to_downstream_stages(run_state, monkeypatch, capsys
 
 
 def test_invalidate_skips_invalid_cascaded_manifest_entries(run_state, monkeypatch, capsys):
-    """Cascaded names come from manifest.completed, which is data, not
-    trusted input — a tampered entry like "../escape" is skipped, never
-    joined into an unlink path outside run_dir."""
+    """A tampered manifest is not today's run: only the named stage goes, and
+    an entry like "../escape" never reaches an unlink path."""
     module, run_dir = run_state
     module.main(["begin"])
     capsys.readouterr()
@@ -481,7 +333,6 @@ def test_invalidate_skips_invalid_cascaded_manifest_entries(run_state, monkeypat
     assert rc == 0
     assert _out(capsys) == {"invalidated": ["verify"], "absent": []}
     assert outside.exists()
-    assert _manifest(run_dir)["completed"] == [["bad"]]
 
 
 def test_invalidate_manifest_write_failure_keeps_artifacts(run_state, monkeypatch, capsys):
@@ -498,7 +349,7 @@ def test_invalidate_manifest_write_failure_keeps_artifacts(run_state, monkeypatc
     def _boom(*_args, **_kwargs):
         raise OSError("disk full")
 
-    monkeypatch.setattr(module, "_atomic_write_json", _boom)
+    monkeypatch.setattr(module, "write_json", _boom)
     rc = module.main(["invalidate", "verify"])
     captured = capsys.readouterr()
 
@@ -547,7 +398,7 @@ def test_write_failure_exits_1(run_state, monkeypatch, capsys):
     def _boom(*_args, **_kwargs):
         raise OSError("disk full")
 
-    monkeypatch.setattr(module, "_atomic_write_json", _boom)
+    monkeypatch.setattr(module, "write_json", _boom)
 
     rc = module.main(["begin"])
     captured = capsys.readouterr()
@@ -555,6 +406,28 @@ def test_write_failure_exits_1(run_state, monkeypatch, capsys):
     assert rc == 1
     assert "begin failed" in captured.err
     assert "disk full" in captured.err
+
+
+def test_a_save_after_midnight_keeps_the_run_it_belongs_to(run_state, monkeypatch, capsys):
+    """Review on 8f7a5373: a run that crosses 00:00 UTC must not lose the
+    stages it completed before midnight."""
+    module, run_dir = run_state
+    _freeze(module, monkeypatch, datetime(2026, 6, 15, 23, 50, tzinfo=UTC))
+    module.main(["begin"])
+    for stage in ("fetch", "candidates"):
+        _stdin(monkeypatch, {"stage": stage})
+        module.main(["save", stage])
+    _freeze(module, monkeypatch, datetime(2026, 6, 16, 0, 5, tzinfo=UTC))
+    _stdin(monkeypatch, {"stage": "working_set"})
+    assert module.main(["save", "working_set"]) == 0
+    assert _manifest(run_dir) == {
+        "run_date": "2026-06-15",
+        "completed": ["fetch", "candidates", "working_set"],
+    }
+    capsys.readouterr()
+    assert module.main(["begin"]) == 0
+    assert _out(capsys)["resume"] is False
+    assert not (run_dir / "fetch.json").exists()
 
 
 if __name__ == "__main__":
