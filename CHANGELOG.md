@@ -1,5 +1,9 @@
 # Changelog
 
+### Conference follow-ups send through one-tap cards (jbaruch/nanoclaw#1253)
+
+Follow-ups were held by a host-private `conference.followup.v1` callback with its own ledger, store, contact log and recovery tools; it never sent a mail. Each follow-up is now a `gmail.send.v1` card «✉️ Письмо для …» that the host sends on Baruch's tap (jbaruch/nanoclaw#1263, #1275). Deleted: the intake validator, the card builder, the callback wrapper, both references and `rules/conference-followup-callbacks.md`.
+
 ## 0.2.2 — 2026-11-03
 
 ### Simplify the check-cfps run-state store (jbaruch/nanoclaw#1256)

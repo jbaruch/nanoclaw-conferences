@@ -9,7 +9,6 @@
     "skills/conference-followups"
   ],
   "rules": [
-    "rules/nanoclaw-skill-root.md",
-    "rules/conference-followup-callbacks.md"
+    "rules/nanoclaw-skill-root.md"
   ]
 }

@@ -64,14 +64,13 @@ Reads of admin-owned files resolve because admin co-loads with this overlay in t
 
 | Rule | Description |
 |---|---|
-| [conference-followup-callbacks](rules/conference-followup-callbacks.md) | Versioned host-private follow-up holds, exact owner decisions and confirmed first-contact sends. |
 | [nanoclaw-skill-root](rules/nanoclaw-skill-root.md) | Command blocks run co-shipped scripts through NanoClaw's skill mount, `/home/node/.claude/skills/tessl__<skill>/scripts/<file>`, the only skill root an agent container has. |
 
 ## Skills
 
 | Skill | Description |
 |-------|-------------|
-| [conference-followups](skills/conference-followups/SKILL.md) | Ground free-text/voice-transcript contacts, resolve addresses, humanize drafts and present host-held Send/Cancel/Edit cards. Requires the published host consumer and dedicated gateway identity; no live acceptance or account access is implied. |
+| [conference-followups](skills/conference-followups/SKILL.md) | From Baruch's list of people met at a conference, find real addresses, draft one email each in his voice and post each as a one-tap «Отправить» card; calendar holds only for agreed meetings. |
 | [check-cfps](skills/check-cfps/SKILL.md) | Finds open CFPs relevant to the user across Java/AI/developer conferences and maintains persistent CFP state (sent/dismissed/remind) in `cfp-state.json`. Use when the user asks about upcoming conferences, call for papers, speaking opportunities, CFP deadlines, or where to submit a talk proposal. |
 | [nightly-cfp-sync](skills/nightly-cfp-sync/SKILL.md) | Cadence wrapper (cron `30 6`, precheck-gated by a filesystem cadence cursor) that runs `check-cfps` on a schedule, consumes the CFP list internally, and surfaces verification failures or missing-topic-evidence notices. Emits the observable-silence cursor marker the silent-success watchdog reads. |
 
