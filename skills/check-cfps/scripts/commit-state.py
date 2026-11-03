@@ -34,13 +34,8 @@ maps every working-set slug to record_digest(original_record), using None
 for an absent record. Under the same write lock, changed source records are
 skipped and reported in skipped_changed; operator actions still win. The
 legacy output shape stays unchanged when this option is absent.
-Optional --unique-cfp-url URL requires --expected-digests and exactly one
-proposed slug whose cfp_url matches that public reference. Under the SAME
-write lock, the current non-config records must contain exactly that one
-slug with the reference (ignoring trailing slashes only); otherwise it is
-skipped_changed, with no write. This is refusal-only, never a new writer or
-permission. Unique-reference zero-write calls never initialize an absent
-state file; existing callers retain their original bootstrap behavior.
+--submission-confirmed lets a confirmation mail overwrite an operator decision:
+the mail proves the submission happened after that decision.
 --snapshot instead reads a slug -> original record (or null for absence)
 JSON object from stdin and emits its fingerprint mapping without opening the
 state file. It is mutually exclusive with --expected-digests. Complete guarded
@@ -134,7 +129,11 @@ def main(argv=None) -> int:
         description="Commit the Step 8 working set to cfp-state.json under the advisory lock."
     )
     parser.add_argument("--state", type=Path, default=DEFAULT_STATE_PATH)
-    parser.add_argument("--unique-cfp-url", help="Refuse an ambiguous current CFP reference")
+    parser.add_argument(
+        "--submission-confirmed",
+        action="store_true",
+        help="A confirmation mail proves the submission, so it outranks an earlier decision",
+    )
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument(
         "--expected-digests", type=Path, help="JSON source fingerprints for every proposed slug"
@@ -145,10 +144,6 @@ def main(argv=None) -> int:
         help="Emit source fingerprints from stdin; no state access",
     )
     args = parser.parse_args(argv)
-
-    if args.unique_cfp_url is not None and (args.snapshot or args.expected_digests is None):
-        sys.stderr.write("commit-state: unique CFP reference requires guarded commit mode\n")
-        return 1
 
     raw = sys.stdin.read()
     try:
@@ -177,18 +172,6 @@ def main(argv=None) -> int:
                 f"expected an object — fix the working set and rerun\n"
             )
             return 1
-
-    if args.unique_cfp_url is not None and (
-        not args.unique_cfp_url
-        or len(working_set) != 1
-        or any(
-            not isinstance(record.get("cfp_url"), str)
-            or record["cfp_url"].rstrip("/") != args.unique_cfp_url.rstrip("/")
-            for record in working_set.values()
-        )
-    ):
-        sys.stderr.write("commit-state: supply one proposed record with the exact CFP reference\n")
-        return 1
 
     if args.snapshot:
         try:
@@ -251,25 +234,16 @@ def main(argv=None) -> int:
             written = 0
             skipped_user_actioned = 0
             skipped_changed: list[str] = []
-            reference_matches = None
-            if args.unique_cfp_url is not None:
-                reference_matches = {
-                    slug
-                    for slug, record in state.items()
-                    if not slug.startswith("_")
-                    and isinstance(record, dict)
-                    and isinstance(record.get("cfp_url"), str)
-                    and record["cfp_url"].rstrip("/") == args.unique_cfp_url.rstrip("/")
-                }
             for slug, record in working_set.items():
                 on_disk = state.get(slug)
                 # Commit-time re-check against the FRESH read: the agent's
                 # copy may predate a user action taken mid-run.
-                if isinstance(on_disk, dict) and on_disk.get("user_actioned") is True:
+                if (
+                    isinstance(on_disk, dict)
+                    and on_disk.get("user_actioned") is True
+                    and not args.submission_confirmed
+                ):
                     skipped_user_actioned += 1
-                    continue
-                if reference_matches is not None and reference_matches != {slug}:
-                    skipped_changed.append(slug)
                     continue
                 if expected is not None:
                     try:
@@ -290,7 +264,7 @@ def main(argv=None) -> int:
             # working set: the file has to exist for the stampers that
             # follow, so materialize `{}` rather than skipping the write.
             # An existing file with nothing written stays untouched.
-            if written or (state_absent and args.unique_cfp_url is None):
+            if written or state_absent:
                 try:
                     _atomic_write_json(args.state, state)
                 except OSError as exc:
