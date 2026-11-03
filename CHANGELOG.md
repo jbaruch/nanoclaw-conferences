@@ -1,6 +1,8 @@
 # Changelog
 
-Clarify CFP submission skill triggers, add an executable date-query input example and distinguish input repair from uncertain-state recovery after the publication review rejected the original guide.
+### Replace the submissions ledger with a nightly script (#105)
+
+The `cfp-submissions` ledger (about 8,600 lines) never ran: its state file doesn't exist. Its job is now `nightly-cfp-sync/scripts/mark-submitted.py`, about 180 lines. Confirmation mail from Sessionize, SCaLE and Oxford Abstracts marks the CFP `sent` with its talk titles and archives the mail, and the brief stops listing it. This runs on the existing nightly job, with no separate switch to turn on.
 
 ## 0.2.0 — 2026-11-01
 

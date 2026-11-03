@@ -6,8 +6,7 @@
   "skills": [
     "skills/check-cfps",
     "skills/nightly-cfp-sync",
-    "skills/conference-followups",
-    "skills/cfp-submissions"
+    "skills/conference-followups"
   ],
   "rules": [
     "rules/nanoclaw-skill-root.md",
