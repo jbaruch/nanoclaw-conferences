@@ -1,63 +1,31 @@
 #!/usr/bin/env python3
-"""Run-state checkpoint store for the check-cfps pipeline (resumable runs).
+"""Same-day checkpoints for the check-cfps pipeline, so a continuation resumes.
 
-check-cfps is an agent-orchestrated pipeline: deterministic helper scripts
-(fetch, prepare-sessionize-batch, apply-sessionize-results, dedup, ...)
-bracket agent-only steps (MCP calls, web search, relevance judgment). The
-agent historically held every stage's intermediate artifact in context and
-persisted only at Step 8, so a token-limit continuation lost the working
-set and reconstructed it from a chat summary
-(jbaruch/nanoclaw-conferences#4 — the 2026-06-10 run blew its budget
-mid-pipeline, then re-derived prep output and the state schema from memory).
+On 2026-06-10 a run blew its token budget mid-pipeline and rebuilt its working
+set from a chat summary (jbaruch/nanoclaw-conferences#4). Each stage now saves
+its artifact here, and a continuation the same UTC day reloads it.
 
-This script gives each stage a durable, machine-readable checkpoint on
-disk so a continuation re-reads the last artifact instead of rebuilding it.
-Artifacts live in a per-run directory (default
-`/workspace/group/state/cfp-run/`, override via `CFP_RUN_STATE_DIR`):
-
-  manifest.json   {"schema_version": 2, "run_date": "<YYYY-MM-DD UTC>",
-                   "completed": ["fetch", "candidates", ...]}
-  <stage>.json    the JSON artifact saved for that stage
-
-Subcommands:
-  begin          Start (or resume) a run. An older schema_version is
-                 upgraded in place by the owner (see _migrate_manifest).
-                 If manifest.json exists with
-                 run_date == today (UTC), resume: emit
-                 {"resume": true, "run_date", "completed": [...]}. Otherwise
-                 (absent, stale date, or unreadable manifest) reset the dir
-                 to a fresh manifest and emit
-                 {"resume": false, "run_date", "completed": []}.
-  save <stage>   Read a JSON artifact on stdin, write <stage>.json
-                 atomically, append <stage> to manifest.completed
-                 (order-preserving, deduped). Emit {"saved": "<stage>"}.
-  load <stage>   Print the saved <stage>.json artifact verbatim. Exit 2 if
-                 no artifact was saved for that stage.
-  done           Remove the run directory (success teardown). Emit
-                 {"cleared": true}.
-  invalidate <stage>...
-                 Remove the named stages' artifacts and drop them from
-                 manifest.completed, so a same-day resume re-runs those
-                 steps instead of reloading failed output. Cascades: every
-                 stage completed after the earliest named one is dropped
-                 too (later stages derive from earlier ones). Also accepts
-                 non-manifest markers in the run dir (verify-evidence).
-                 Idempotent — absent stages are reported, not errors.
-                 Emit {"invalidated": [...], "absent": [...]}.
-
-Resume is best-effort, not a correctness requirement: stages are
-idempotent and Step 5 re-verifies the full cohort, so a fresh full run is
-always safe. `begin` resets across UTC-day boundaries precisely so a
-days-later continuation starts clean rather than resuming a stale run.
-
-Stage names are free-form lowercase identifiers (`[a-z0-9][a-z0-9_-]*`),
-excluding the reserved bookkeeping stem `manifest`;
-check-cfps uses fetch, candidates, verify, working_set. Schema doc:
+Directory: `/workspace/group/state/cfp-run/` (override `CFP_RUN_STATE_DIR`),
+holding `manifest.json` = {"run_date": "<YYYY-MM-DD UTC>", "completed":
+[stage, ...]} plus one `<stage>.json` per saved stage. Schema doc:
 `references/run-state.md`.
 
-Exit 0 on success; exit 1 with a stderr diagnostic on bad usage /
-malformed input / I/O failure; exit 2 when `load` is asked for an absent
-stage.
+Commands (JSON on stdout):
+  begin               Resume a run begun today: {"resume": true, "run_date",
+                      "completed"}. Anything else (no manifest, another day,
+                      unreadable) starts fresh: {"resume": false, ...}.
+  save <stage>        Store stdin JSON as <stage>.json, mark it completed:
+                      {"saved": stage}.
+  load <stage>        Print the saved artifact; exit 2 when there is none.
+  invalidate <stage>...
+                      Drop the named stages and every stage completed after
+                      the earliest of them (later stages derive from earlier
+                      ones): {"invalidated": [...], "absent": [...]}.
+  done                Remove the run directory: {"cleared": true}.
+
+Resume only saves work: stages are idempotent and Step 5 re-verifies the
+cohort, so a fresh run is always safe. Stage names match STAGE_RE.
+Exit 0 on success, 1 on bad input or I/O failure, 2 for an absent stage.
 """
 
 import argparse
@@ -70,338 +38,167 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 DEFAULT_RUN_DIR = Path("/workspace/group/state/cfp-run")
-MANIFEST_NAME = "manifest.json"
-SCHEMA_VERSION = 2
+MANIFEST = "manifest.json"
 STAGE_RE = re.compile(r"^(?!manifest\Z)[a-z0-9][a-z0-9_-]*\Z")
 
 
-def _run_dir() -> Path:
-    override = os.environ.get("CFP_RUN_STATE_DIR")
-    return Path(override) if override else DEFAULT_RUN_DIR
+class BadInput(Exception):
+    """Exit 1 with this message."""
 
 
-def _today() -> str:
+def run_dir() -> Path:
+    return Path(os.environ.get("CFP_RUN_STATE_DIR") or DEFAULT_RUN_DIR)
+
+
+def today() -> str:
     return datetime.now(UTC).date().isoformat()
 
 
-def _atomic_write_json(path: Path, payload) -> None:
-    """Write `payload` as JSON to `path` via temp file + fsync + os.replace,
-    preserving the existing file's mode (0644 fallback). Raises on failure;
-    cleanup uses try/finally (no broad except) per
-    `coding-policy: error-handling`."""
+def write_json(path: Path, payload) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
     try:
-        mode = path.stat().st_mode & 0o777
-    except FileNotFoundError:
-        mode = 0o644
-    tmp = tempfile.NamedTemporaryFile(
-        mode="w",
-        dir=path.parent,
-        prefix=f".{path.name}.",
-        suffix=".tmp",
-        delete=False,
-        encoding="utf-8",
-    )
-    replaced = False
-    try:
-        json.dump(payload, tmp, indent=2, ensure_ascii=False)
-        tmp.flush()
-        os.fsync(tmp.fileno())
-        tmp.close()
-        os.chmod(tmp.name, mode)
-        os.replace(tmp.name, path)
-        replaced = True
-    finally:
-        if not replaced:
-            if not tmp.closed:
-                tmp.close()
-            try:
-                os.unlink(tmp.name)
-            except FileNotFoundError:
-                pass
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2, ensure_ascii=False)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, path)
+    except BaseException:
+        Path(tmp).unlink(missing_ok=True)
+        raise
 
 
-def _read_manifest(run_dir: Path):
-    """Return the manifest dict, or None when absent/unreadable/not a dict
-    (any of which `begin` treats as 'no usable prior run')."""
+def manifest(directory: Path) -> dict | None:
+    """Today's manifest, or None when there is no usable run to resume."""
     try:
-        data = json.loads((run_dir / MANIFEST_NAME).read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+        data = json.loads((directory / MANIFEST).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
         return None
-    return data if isinstance(data, dict) else None
-
-
-def _clear_dir(run_dir: Path) -> None:
-    """Delete the run dir's files (manifest + saved stage artifacts).
-    Only files are removed — no recursion — since the store is flat."""
-    if not run_dir.exists():
-        return
-    for child in run_dir.iterdir():
-        if child.is_file():
-            child.unlink()
-
-
-def _truncate_at_stage(manifest: dict, stage: str) -> list:
-    """Drop `stage` and every stage after it from `manifest["completed"]`,
-    returning the stage names whose artifacts the caller must unlink.
-
-    Truncation rather than filtering, for the reason `cmd_invalidate` gives:
-    resume means "start at the first stage NOT in completed", so removing a
-    stage from the middle would let a stale downstream artifact read as
-    current. Manifest content is data, not trusted input — non-string and
-    traversal-shaped entries are gated before they can reach an unlink."""
-    completed = manifest.get("completed")
-    if not isinstance(completed, list):
-        manifest["completed"] = []
-        return []
-    indexes = [i for i, s in enumerate(completed) if isinstance(s, str) and s == stage]
-    if not indexes:
-        return []
-    cut = min(indexes)
-    stale = [s for s in completed[cut:] if isinstance(s, str) and STAGE_RE.match(s)]
-    manifest["completed"] = completed[:cut]
-    return stale
-
-
-def _schema_version(manifest: dict):
-    """Return the manifest's `schema_version` as an int, or None when it is
-    not a JSON integer.
-
-    Equality alone is not enough: `True == 1` and `2.0 == 2` in Python, so a
-    manifest carrying `true` would enter the v1 upgrade step and one carrying
-    `2.0` would pass as current — both bypassing the reset a malformed
-    manifest is supposed to get."""
-    version = manifest.get("schema_version")
-    if isinstance(version, bool) or not isinstance(version, int):
-        return None
-    return version
-
-
-def _migrate_manifest(manifest: dict) -> tuple:
-    """Upgrade an older manifest to SCHEMA_VERSION.
-
-    Returns `(upgraded_manifest, stale_stages)`, or `(None, [])` when the
-    version cannot be upgraded — unrecognized, or newer than this script
-    understands. Per `coding-policy: stateful-artifacts`, only the owner
-    migrates: it detects the older `schema_version`, upgrades the record,
-    and the caller rewrites it. The run itself survives the upgrade — its
-    `run_date` and the stages unaffected by the shape change are kept, so a
-    same-day continuation resumes instead of recomputing everything.
-
-    Each step states which saved stages its shape change invalidates:
-
-    v1 -> v2: the `fetch` artifact gained `sources` and `feed_failure`
-    (jbaruch/nanoclaw-conferences#78), so a v1 `fetch.json` predates both
-    and cannot satisfy a reader that expects them."""
-    upgraded = dict(manifest)
-    stale: list = []
-    version = _schema_version(upgraded)
-
-    if version == 1:
-        stale = _truncate_at_stage(upgraded, "fetch")
-        upgraded["schema_version"] = 2
-        version = 2
-
-    if version != SCHEMA_VERSION:
-        return None, []
-    # Older writers allowed the bookkeeping stem as a stage. Drop that
-    # checkpoint and its descendants before a resume tries to load it.
-    stale.extend(_truncate_at_stage(upgraded, "manifest"))
-    return upgraded, stale
-
-
-def cmd_begin(run_dir: Path) -> int:
-    today = _today()
-    manifest = _read_manifest(run_dir)
     if (
-        manifest is not None
-        and manifest.get("run_date") == today
-        and isinstance(manifest.get("completed"), list)
+        isinstance(data, dict)
+        and data.get("run_date") == today()
+        and isinstance(data.get("completed"), list)
+        and all(isinstance(s, str) and STAGE_RE.match(s) for s in data["completed"])
     ):
-        upgraded, stale = _migrate_manifest(manifest)
-        if upgraded is not None:
-            if upgraded != manifest:
-                # Rewrite BEFORE any unlink, the ordering cmd_invalidate
-                # uses: a failed rewrite aborts with the artifacts intact,
-                # and a failed unlink afterwards leaves only an orphan file
-                # no longer listed in `completed`.
-                _atomic_write_json(run_dir / MANIFEST_NAME, upgraded)
-                for name in stale:
-                    try:
-                        (run_dir / f"{name}.json").unlink()
-                    except FileNotFoundError:
-                        pass
-            print(
-                json.dumps({"resume": True, "run_date": today, "completed": upgraded["completed"]})
-            )
-            return 0
-
-    _clear_dir(run_dir)
-    fresh = {"schema_version": SCHEMA_VERSION, "run_date": today, "completed": []}
-    _atomic_write_json(run_dir / MANIFEST_NAME, fresh)
-    print(json.dumps({"resume": False, "run_date": today, "completed": []}))
-    return 0
+        return {"run_date": data["run_date"], "completed": data["completed"]}
+    return None
 
 
-def cmd_save(run_dir: Path, stage: str) -> int:
+def clear(directory: Path) -> None:
+    if directory.exists():
+        for child in directory.iterdir():
+            if child.is_file():
+                child.unlink()
+
+
+def stage_name(stage: str) -> str:
     if not STAGE_RE.match(stage):
-        sys.stderr.write(f"run-state: invalid stage name {stage!r}\n")
-        return 1
-    raw = sys.stdin.read()
+        raise BadInput(f"invalid stage name {stage!r}")
+    return stage
+
+
+def begin(directory: Path) -> dict:
+    current = manifest(directory)
+    if current is not None:
+        return {"resume": True, **current}
+    clear(directory)
+    fresh = {"run_date": today(), "completed": []}
+    write_json(directory / MANIFEST, fresh)
+    return {"resume": False, **fresh}
+
+
+def save(directory: Path, stage: str, raw: str) -> dict:
+    stage_name(stage)
     try:
         artifact = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        sys.stderr.write(f"run-state: stage {stage!r} stdin is not valid JSON: {exc}\n")
-        return 1
-
-    manifest = _read_manifest(run_dir)
-    if manifest is None:
-        # save before begin (or after a corrupt manifest): start a minimal
-        # run rather than dropping the artifact on the floor. No reset here —
-        # never destroy artifacts on a save.
-        manifest = {"schema_version": SCHEMA_VERSION, "run_date": _today(), "completed": []}
-
-    _atomic_write_json(run_dir / f"{stage}.json", artifact)
-
-    completed = manifest.get("completed")
-    if not isinstance(completed, list):
-        completed = []
-    if stage not in completed:
-        completed.append(stage)
-    manifest["completed"] = completed
-    manifest.setdefault("schema_version", SCHEMA_VERSION)
-    manifest.setdefault("run_date", _today())
-    _atomic_write_json(run_dir / MANIFEST_NAME, manifest)
-
-    print(json.dumps({"saved": stage}))
-    return 0
+    except ValueError as exc:
+        raise BadInput(f"stage {stage!r} stdin is not valid JSON: {exc}") from None
+    current = manifest(directory) or {"run_date": today(), "completed": []}
+    write_json(directory / f"{stage}.json", artifact)
+    if stage not in current["completed"]:
+        current["completed"].append(stage)
+    write_json(directory / MANIFEST, current)
+    return {"saved": stage}
 
 
-def cmd_load(run_dir: Path, stage: str) -> int:
-    if not STAGE_RE.match(stage):
-        sys.stderr.write(f"run-state: invalid stage name {stage!r}\n")
-        return 1
-    path = run_dir / f"{stage}.json"
+def load(directory: Path, stage: str) -> str | None:
+    stage_name(stage)
     try:
-        text = path.read_text(encoding="utf-8")
+        text = (directory / f"{stage}.json").read_text(encoding="utf-8")
     except FileNotFoundError:
-        sys.stderr.write(f"run-state: no saved artifact for stage {stage!r}\n")
-        return 2
-    except (OSError, UnicodeDecodeError) as exc:
-        sys.stderr.write(f"run-state: cannot read stage {stage!r}: {type(exc).__name__}: {exc}\n")
-        return 1
+        return None
+    except UnicodeDecodeError as exc:
+        raise BadInput(f"cannot read stage {stage!r}: {exc}") from None
     try:
         json.loads(text)
-    except json.JSONDecodeError as exc:
-        sys.stderr.write(f"run-state: saved stage {stage!r} is corrupt JSON: {exc}\n")
-        return 1
-    sys.stdout.write(text if text.endswith("\n") else text + "\n")
-    return 0
+    except ValueError as exc:
+        raise BadInput(f"saved stage {stage!r} is corrupt JSON: {exc}") from None
+    return text if text.endswith("\n") else text + "\n"
 
 
-def cmd_invalidate(run_dir: Path, stages: list) -> int:
-    """Remove the named stages so a same-day resume re-runs them. Used on
-    verification-gate failure (stamp-last-checked exit 3): keeping `verify`
-    and `working_set` checkpointed would let the retry reload the same
-    failed evidence and repeat the refusal without a new Sessionize call
-    (jbaruch/nanoclaw-conferences#31).
-
-    Cascades downstream: `completed` is completion-ordered and later stages
-    derive from earlier ones, so everything after the earliest named stage
-    is invalidated too — resume means "start at the first stage NOT in
-    completed", and a non-prefix removal would let a stale downstream
-    artifact be treated as current. The manifest rewrite happens BEFORE any
-    unlink: a failed rewrite aborts with the artifacts intact, and a failed
-    unlink afterwards leaves only an orphan file no longer listed in
-    `completed` (harmless — `save` overwrites, `begin`'s reset clears)."""
-    for stage in stages:
-        if not STAGE_RE.match(stage):
-            sys.stderr.write(f"run-state: invalid stage name {stage!r}\n")
-            return 1
-
-    targets = list(dict.fromkeys(stages))
-    manifest = _read_manifest(run_dir)
-    if manifest is not None:
-        completed = manifest.get("completed")
-        if isinstance(completed, list):
-            # Manifest content is data, not trusted input: entries may be
-            # non-string/unhashable (would TypeError on set membership) or
-            # traversal-shaped like "../escape" (must never reach the
-            # unlink below). Gate every element before using it.
-            named = set(targets)
-            named_indexes = [
-                i for i, s in enumerate(completed) if isinstance(s, str) and s in named
-            ]
-            if named_indexes:
-                cut = min(named_indexes)
-                for cascaded in completed[cut:]:
-                    if not isinstance(cascaded, str) or not STAGE_RE.match(cascaded):
-                        continue
-                    if cascaded not in targets:
-                        targets.append(cascaded)
-                manifest["completed"] = completed[:cut]
-                _atomic_write_json(run_dir / MANIFEST_NAME, manifest)
-
-    invalidated = []
-    absent = []
+def invalidate(directory: Path, stages: list[str]) -> dict:
+    targets = list(dict.fromkeys(stage_name(s) for s in stages))
+    current = manifest(directory)
+    if current is not None:
+        hits = [i for i, s in enumerate(current["completed"]) if s in targets]
+        if hits:
+            cut = min(hits)
+            targets += [s for s in current["completed"][cut:] if s not in targets]
+            current["completed"] = current["completed"][:cut]
+            # Rewrite before unlinking: a failed write leaves the artifacts intact.
+            write_json(directory / MANIFEST, current)
+    invalidated, absent = [], []
     for stage in targets:
         try:
-            (run_dir / f"{stage}.json").unlink()
+            (directory / f"{stage}.json").unlink()
             invalidated.append(stage)
         except FileNotFoundError:
             absent.append(stage)
-
-    print(json.dumps({"invalidated": invalidated, "absent": absent}))
-    return 0
+    return {"invalidated": invalidated, "absent": absent}
 
 
-def cmd_done(run_dir: Path) -> int:
-    _clear_dir(run_dir)
-    if run_dir.exists():
-        try:
-            run_dir.rmdir()
-        except OSError:
-            # Non-empty (a subdir we didn't create) — leave it; the files
-            # are already gone, which is what `done` promises.
-            pass
-    print(json.dumps({"cleared": True}))
-    return 0
+def done(directory: Path) -> dict:
+    clear(directory)
+    if directory.exists():
+        directory.rmdir()
+    return {"cleared": True}
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Run-state checkpoint store for the check-cfps pipeline."
-    )
+    parser = argparse.ArgumentParser(description="Same-day check-cfps checkpoints.")
     sub = parser.add_subparsers(dest="command", required=True)
-    sub.add_parser("begin", help="start or resume a run")
-    p_save = sub.add_parser("save", help="save a stage artifact from stdin")
-    p_save.add_argument("stage")
-    p_load = sub.add_parser("load", help="print a saved stage artifact")
-    p_load.add_argument("stage")
-    sub.add_parser("done", help="clear the run directory on success")
-    p_inv = sub.add_parser("invalidate", help="remove stages so a resume re-runs them")
-    p_inv.add_argument("stages", nargs="+")
+    sub.add_parser("begin")
+    sub.add_parser("save").add_argument("stage")
+    sub.add_parser("load").add_argument("stage")
+    sub.add_parser("invalidate").add_argument("stages", nargs="+")
+    sub.add_parser("done")
     args = parser.parse_args(argv)
-
-    run_dir = _run_dir()
-    # Catch write/remove/mkdir failures from any subcommand so the process
-    # contract is explicit (exit 1 + stderr diagnostic) rather than an
-    # accidental traceback per `coding-policy: script-delegation`. cmd_load's
-    # own read handling returns 2/1 before reaching here.
+    directory = run_dir()
     try:
-        if args.command == "begin":
-            return cmd_begin(run_dir)
-        if args.command == "save":
-            return cmd_save(run_dir, args.stage)
         if args.command == "load":
-            return cmd_load(run_dir, args.stage)
-        if args.command == "invalidate":
-            return cmd_invalidate(run_dir, args.stages)
-        # `done` — the only remaining branch under a required subparser.
-        return cmd_done(run_dir)
+            text = load(directory, args.stage)
+            if text is None:
+                sys.stderr.write(f"run-state: no saved artifact for stage {args.stage!r}\n")
+                return 2
+            sys.stdout.write(text)
+            return 0
+        if args.command == "begin":
+            result = begin(directory)
+        elif args.command == "save":
+            result = save(directory, args.stage, sys.stdin.read())
+        elif args.command == "invalidate":
+            result = invalidate(directory, args.stages)
+        else:
+            result = done(directory)
+    except BadInput as exc:
+        sys.stderr.write(f"run-state: {exc}\n")
+        return 1
     except OSError as exc:
         sys.stderr.write(f"run-state: {args.command} failed: {type(exc).__name__}: {exc}\n")
         return 1
+    print(json.dumps(result))
+    return 0
 
 
 if __name__ == "__main__":
