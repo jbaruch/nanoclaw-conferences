@@ -1,5 +1,9 @@
 # Changelog
 
+### Recheck CFP relevance on Jev 1.14 (part of jbaruch/nanoclaw-admin#756)
+
+Move the CFP relevance pin to `jev-1.14.0`. A matched replay of the existing 17 operator-labelled cases preserved all routes: three correct automatic decisions and fourteen reasoning fallbacks on both models. Keep the probability bands unchanged; retain the small-cohort limitation in the calibration reference.
+
 ## 0.2.3 — 2026-11-03
 
 ### Conference follow-ups send through one-tap cards (jbaruch/nanoclaw#1253)

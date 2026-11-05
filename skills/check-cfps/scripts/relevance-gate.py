@@ -36,7 +36,7 @@ from pathlib import Path
 import website_meta
 
 # Renew monthly from /v1/models; rerun the labelled calibration before changing.
-MODEL = "jev-1.13.0"
+MODEL = "jev-1.14.0"
 HIGH_FIT = 0.85
 LOW_FIT = 0.35
 KIND_PROBABILITY = 0.80

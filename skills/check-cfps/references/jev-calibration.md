@@ -20,3 +20,23 @@ This small set selected conservative routing boundaries; it is not an
 independent accuracy estimate. Retain the middle band until a larger
 labelled evaluation supports narrowing it. Re-evaluate when the model,
 questions, profile or metadata projection changes.
+
+
+# Model renewal — 2026-11-05
+
+The same 17 non-geographic yes/no cases were replayed against `jev-1.13.0`
+and `jev-1.14.0`, using the current speaker profile, criteria and candidate
+metadata. Public website descriptions were fetched once; two were unavailable.
+Each pair received the same frozen state and questions, without labels or prior
+scores. Private input bundle SHA-256: `972e331c270ecc9913d2953451c552223d832202313585f862c08047e485a503`.
+
+Both models produced usable distributions for all 17 cases. With the existing
+bands, both kept FOSDEM and DevFest Berlin, dismissed Dev Days Students Madrid,
+and sent fourteen cases to the reasoning model. All three automatic decisions
+matched the operator's labels; no case changed route. The pin moves to 1.14
+without changing the bands.
+
+This replay checks this cohort's routing, not independent accuracy on future
+conferences. The private run artifact retains each packet digest, probability
+distribution, metadata warning and the co-shipped evaluator's summary. No CFP
+state or owner decision changed during the comparison.
