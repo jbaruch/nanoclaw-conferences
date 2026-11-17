@@ -102,6 +102,25 @@ The `nightly-cfp-sync` cadence wrapper carries its own scripts:
 - `scripts/precheck-nightly-cfp-sync.py` — fire-time precheck that gates wake-ups by the cadence cursor
 - `scripts/stamp-cursor.py` — advances the `nightly-cfp-sync-cursor.json` success cursor, gated on this run's verification heartbeat (`--since` run-start input; predicate in the script); refuses (exit 3) on a run that skipped verification so the cadence retries instead of resting on an unverified pass
 
+## Dependency updates
+
+[Renovate](renovate.json) is this repository's only dependency scanner. Its native
+[pip requirements](https://docs.renovatebot.com/modules/manager/pip_requirements/)
+and [GitHub Actions](https://docs.renovatebot.com/modules/manager/github-actions/)
+managers cover `requirements-dev.txt` and `.github/workflows/`.
+
+Renovate runs in full mode, with PR creation scheduled before 06:00 UTC on Mondays
+and at most five concurrent PRs. Minor, patch and digest updates share one PR;
+major updates require approval in the Dependency Dashboard. Commits use
+`chore(deps)`. Compiler-managed gh-aw action pins retain their exclusions; adopt
+those updates through a gh-aw compiler upgrade and recompile.
+
+Validate configuration changes with:
+
+```sh
+npx --yes --package renovate -- renovate-config-validator renovate.json
+```
+
 ## Status
 
 - **V1.1** — adds the `nightly-cfp-sync` cadence wrapper alongside `check-cfps`, so the plugin owns both the user-driven CFP lookup and its scheduled refresh (mirrors `nanoclaw-flight-assist` bundling its `sync-tripit` cadence driver with `check-travel-bookings`). The wrapper materialises one `scheduled_tasks` row in chats that load this overlay.
