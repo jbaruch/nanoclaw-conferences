@@ -104,7 +104,8 @@ The `nightly-cfp-sync` cadence wrapper carries its own scripts:
 
 ## Dependency updates
 
-[Renovate](renovate.json) is this repository's only dependency scanner. Its native
+[Renovate](https://github.com/jbaruch/nanoclaw-conferences/blob/main/renovate.json)
+is this repository's only dependency scanner. Its native
 [pip requirements](https://docs.renovatebot.com/modules/manager/pip_requirements/)
 and [GitHub Actions](https://docs.renovatebot.com/modules/manager/github-actions/)
 managers cover `requirements-dev.txt` and `.github/workflows/`.
@@ -112,14 +113,7 @@ managers cover `requirements-dev.txt` and `.github/workflows/`.
 Renovate runs in full mode, with PR creation scheduled before 06:00 UTC on Mondays
 and at most five concurrent PRs. Minor, patch and digest updates share one PR;
 major updates require approval in the Dependency Dashboard. Commits use
-`chore(deps)`. Compiler-managed gh-aw action pins retain their exclusions; adopt
-those updates through a gh-aw compiler upgrade and recompile.
-
-Validate configuration changes with:
-
-```sh
-npx --yes --package renovate -- renovate-config-validator renovate.json
-```
+`chore(deps)`.
 
 ## Status
 

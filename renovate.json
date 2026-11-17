@@ -14,19 +14,6 @@
     {
       "matchUpdateTypes": ["major"],
       "dependencyDashboardApproval": true
-    },
-    {
-      "description": "Preserve compiler-managed gh-aw action pins; update through a compiler upgrade and recompile.",
-      "matchManagers": ["github-actions"],
-      "matchPackageNames": [
-        "actions/cache*",
-        "actions/download-artifact",
-        "actions/github-script",
-        "actions/setup-node",
-        "actions/upload-artifact",
-        "github/gh-aw-actions*"
-      ],
-      "enabled": false
     }
   ]
 }
