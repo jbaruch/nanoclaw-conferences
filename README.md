@@ -116,9 +116,8 @@ branch. Preserve the branch/tag comment when changing a SHA pin; Renovate
 [disables bare SHA references](https://docs.renovatebot.com/modules/manager/github-actions/#digest-pinning-and-updating).
 
 Renovate runs in full mode. Regular update PRs are scheduled before 06:00 UTC on
-Mondays, with at most five open at a time. Minor, patch and digest updates share one PR;
-major updates require approval in the Dependency Dashboard. Commits use
-`chore(deps)`.
+Mondays, with at most five open at a time. Minor, patch and digest updates share one PR.
+Commits use `chore(deps)`.
 
 When GitHub vulnerability alerts and Renovate's access to them are enabled,
 [security PRs](https://docs.renovatebot.com/configuration-options/#vulnerabilityalerts)

@@ -1,10 +1,20 @@
 """Repository automation and plugin distribution contracts."""
 
+import json
 import re
 import subprocess
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_renovate_updates_do_not_require_dashboard_approval():
+    config = json.loads((REPO_ROOT / "renovate.json").read_text())
+    assert not config.get("dependencyDashboardApproval", False)
+    assert all(
+        not rule.get("dependencyDashboardApproval", False) for rule in config["packageRules"]
+    )
+    assert config["prConcurrentLimit"] == 5
 
 
 def test_publish_workflow_pin_has_renovate_tracking_ref():
