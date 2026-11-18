@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   publish:
-    uses: jbaruch/coding-policy/.github/workflows/publish-plugin.yml@24de5281d2878c1aef1681618bfaf654e3be1582
+    uses: jbaruch/coding-policy/.github/workflows/publish-plugin.yml@24de5281d2878c1aef1681618bfaf654e3be1582 # main
     # Forward only the token the reusable workflow declares (not `inherit`).
     secrets:
       TESSL_TOKEN: ${{ secrets.TESSL_TOKEN }}

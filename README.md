@@ -102,6 +102,60 @@ The `nightly-cfp-sync` cadence wrapper carries its own scripts:
 - `scripts/precheck-nightly-cfp-sync.py` — fire-time precheck that gates wake-ups by the cadence cursor
 - `scripts/stamp-cursor.py` — advances the `nightly-cfp-sync-cursor.json` success cursor, gated on this run's verification heartbeat (`--since` run-start input; predicate in the script); refuses (exit 3) on a run that skipped verification so the cadence retries instead of resting on an unverified pass
 
+## Dependency updates
+
+[Renovate](https://github.com/jbaruch/nanoclaw-conferences/blob/main/renovate.json)
+is this repository's only dependency scanner. Its native
+[pip requirements](https://docs.renovatebot.com/modules/manager/pip_requirements/)
+and [GitHub Actions](https://docs.renovatebot.com/modules/manager/github-actions/)
+managers cover `requirements-dev.txt` and `.github/workflows/`.
+
+The SHA-pinned reusable workflow in [publish.yml](.github/workflows/publish.yml)
+keeps an inline `# main` comment so Renovate can renew its digest against that
+branch. Preserve the branch/tag comment when changing a SHA pin; Renovate
+[disables bare SHA references](https://docs.renovatebot.com/modules/manager/github-actions/#digest-pinning-and-updating).
+
+Renovate runs in full mode. Regular update PRs are scheduled before 06:00 UTC on
+Mondays, with at most five open at a time. Minor, patch and digest updates share one PR;
+major updates require approval in the Dependency Dashboard. Commits use
+`chore(deps)`.
+
+When GitHub vulnerability alerts and Renovate's access to them are enabled,
+[security PRs](https://docs.renovatebot.com/configuration-options/#vulnerabilityalerts)
+bypass this schedule and have a separate, unlimited concurrent PR budget by default.
+
+Before relying on automatic updates:
+
+- Grant the [Mend Renovate GitHub App](https://github.com/apps/renovate) access to
+  `jbaruch/nanoclaw-conferences` ([installation instructions](https://docs.renovatebot.com/getting-started/installing-onboarding/#repository-installation)).
+- Confirm automatic processing is enabled in the [Mend dashboard](https://developer.mend.io/)
+  and check the repository's job logs for configuration or dependency lookup errors
+  ([job scheduling](https://docs.renovatebot.com/mend-hosted/job-scheduling/)).
+- Keep `FLEET_DISPATCH_TOKEN` configured in
+  [Actions secrets](https://github.com/jbaruch/nanoclaw-conferences/settings/secrets/actions)
+  with Actions read/write access to `jbaruch/coding-policy`, as required by
+  [review-trigger.yml](.github/workflows/review-trigger.yml). Same-repository Renovate
+  PRs enter this review path: it passes the repository name, PR number and base ref
+  to the fleet review workflow. Keep `TESSL_TOKEN` configured for the
+  [publish workflow](.github/workflows/publish.yml).
+
+Validate configuration changes from the repository root using the
+[Renovate configuration validator](https://docs.renovatebot.com/config-validation/):
+
+```sh
+npx --yes --package renovate@44.251.0 -- renovate-config-validator
+test ! -e .github/dependabot.yml
+```
+
+Renew the validator pin quarterly: choose an exact version from
+[Renovate releases](https://github.com/renovatebot/renovate/releases), update the
+command above, and rerun it.
+
+These checks validate local configuration. After activation, verify a scheduled
+Renovate run and its update PRs in the Mend job logs and GitHub, including renewal
+of the publish workflow pin. The [fleet acceptance issue](https://github.com/jbaruch/nanoclaw/issues/1433)
+defines the required settings and ecosystem coverage.
+
 ## Status
 
 - **V1.1** — adds the `nightly-cfp-sync` cadence wrapper alongside `check-cfps`, so the plugin owns both the user-driven CFP lookup and its scheduled refresh (mirrors `nanoclaw-flight-assist` bundling its `sync-tripit` cadence driver with `check-travel-bookings`). The wrapper materialises one `scheduled_tasks` row in chats that load this overlay.

@@ -11,6 +11,7 @@
 tests/
 pyproject.toml
 requirements-dev.txt
+/renovate.json
 
 # Python build artifacts
 __pycache__/
