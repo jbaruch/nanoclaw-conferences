@@ -110,10 +110,14 @@ is this repository's only dependency scanner. Its native
 and [GitHub Actions](https://docs.renovatebot.com/modules/manager/github-actions/)
 managers cover `requirements-dev.txt` and `.github/workflows/`.
 
-Renovate runs in full mode, with PR creation scheduled before 06:00 UTC on Mondays
-and at most five concurrent PRs. Minor, patch and digest updates share one PR;
+Renovate runs in full mode. Regular update PRs are scheduled before 06:00 UTC on
+Mondays, with at most five open at a time. Minor, patch and digest updates share one PR;
 major updates require approval in the Dependency Dashboard. Commits use
 `chore(deps)`.
+
+When GitHub vulnerability alerts and Renovate's access to them are enabled,
+[security PRs](https://docs.renovatebot.com/configuration-options/#vulnerabilityalerts)
+bypass this schedule and have a separate, unlimited concurrent PR budget by default.
 
 ## Status
 
