@@ -110,6 +110,11 @@ is this repository's only dependency scanner. Its native
 and [GitHub Actions](https://docs.renovatebot.com/modules/manager/github-actions/)
 managers cover `requirements-dev.txt` and `.github/workflows/`.
 
+The SHA-pinned reusable workflow in [publish.yml](.github/workflows/publish.yml)
+keeps an inline `# main` comment so Renovate can renew its digest against that
+branch. Preserve the branch/tag comment when changing a SHA pin; Renovate
+[disables bare SHA references](https://docs.renovatebot.com/modules/manager/github-actions/#digest-pinning-and-updating).
+
 Renovate runs in full mode. Regular update PRs are scheduled before 06:00 UTC on
 Mondays, with at most five open at a time. Minor, patch and digest updates share one PR;
 major updates require approval in the Dependency Dashboard. Commits use
@@ -118,6 +123,33 @@ major updates require approval in the Dependency Dashboard. Commits use
 When GitHub vulnerability alerts and Renovate's access to them are enabled,
 [security PRs](https://docs.renovatebot.com/configuration-options/#vulnerabilityalerts)
 bypass this schedule and have a separate, unlimited concurrent PR budget by default.
+
+Before relying on automatic updates:
+
+- Grant the [Mend Renovate GitHub App](https://github.com/apps/renovate) access to
+  `jbaruch/nanoclaw-conferences` ([installation instructions](https://docs.renovatebot.com/getting-started/installing-onboarding/#repository-installation)).
+- Confirm automatic processing is enabled in the [Mend dashboard](https://developer.mend.io/)
+  and check the repository's job logs for configuration or dependency lookup errors
+  ([job scheduling](https://docs.renovatebot.com/mend-hosted/job-scheduling/)).
+- Keep `FLEET_DISPATCH_TOKEN` configured in
+  [Actions secrets](https://github.com/jbaruch/nanoclaw-conferences/settings/secrets/actions)
+  with Actions read/write access to `jbaruch/coding-policy`, as required by
+  [review-trigger.yml](.github/workflows/review-trigger.yml). Same-repository Renovate
+  PRs enter this review path: it passes the repository name, PR number and base ref
+  to the fleet review workflow. Keep `TESSL_TOKEN` configured for the
+  [publish workflow](.github/workflows/publish.yml).
+
+Validate configuration changes from the repository root:
+
+```sh
+npx --yes --package renovate -- renovate-config-validator
+test ! -e .github/dependabot.yml
+```
+
+These checks validate local configuration. After activation, verify a scheduled
+Renovate run and its update PRs in the Mend job logs and GitHub, including renewal
+of the publish workflow pin. The [fleet acceptance issue](https://github.com/jbaruch/nanoclaw/issues/1433)
+defines the required settings and ecosystem coverage.
 
 ## Status
 
