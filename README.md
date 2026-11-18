@@ -139,12 +139,17 @@ Before relying on automatic updates:
   to the fleet review workflow. Keep `TESSL_TOKEN` configured for the
   [publish workflow](.github/workflows/publish.yml).
 
-Validate configuration changes from the repository root:
+Validate configuration changes from the repository root using the
+[Renovate configuration validator](https://docs.renovatebot.com/config-validation/):
 
 ```sh
-npx --yes --package renovate -- renovate-config-validator
+npx --yes --package renovate@44.251.0 -- renovate-config-validator
 test ! -e .github/dependabot.yml
 ```
+
+Renew the validator pin quarterly: choose an exact version from
+[Renovate releases](https://github.com/renovatebot/renovate/releases), update the
+command above, and rerun it.
 
 These checks validate local configuration. After activation, verify a scheduled
 Renovate run and its update PRs in the Mend job logs and GitHub, including renewal
