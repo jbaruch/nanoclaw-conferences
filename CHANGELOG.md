@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.11 — 2026-11-18
+
+- chore(renovate): drop the major update approval gate (#123)
+
 ## 0.2.10 — 2026-11-18
 
 - chore(deps): make Renovate the only dependency scanner (#118)
